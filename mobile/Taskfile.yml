@@ -1,0 +1,26 @@
+# Taskfile for the Flutter `mobile` app.
+#
+# Tasks run from this Taskfile's own directory (the Flutter project root) via
+# `dir: '{{.TASKFILE_DIR}}'`, so `flutter` commands always target the mobile
+# app regardless of where `task` is invoked from.
+
+version: '3'
+
+tasks:
+  run:linux:
+    desc: Run the mobile app on Linux (desktop)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - flutter run -d linux
+
+  run:android:
+    desc: Run the mobile app on an Android device/emulator
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - flutter run -d android
+
+  run:chrome:
+    desc: Run the mobile app in Chrome (web)
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - flutter run -d chrome

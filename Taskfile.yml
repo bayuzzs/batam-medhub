@@ -1,0 +1,14 @@
+# Monorepo root Taskfile.
+#
+# Namespace the per-platform Taskfiles so tasks can be invoked as:
+#   task mobile:run:linux
+#   task mobile:run:android
+#   task mobile:run:chrome
+#
+# To list everything:  task --list-all
+
+version: '3'
+
+includes:
+  mobile:
+    taskfile: ./mobile/Taskfile.yml
