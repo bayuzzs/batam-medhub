@@ -2,14 +2,13 @@ package providerapp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +16,9 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"batam-medhub/providers/internal/hospital"
+	"batam-medhub/providers/internal/platform"
 )
 
 type Identity struct {
@@ -33,6 +35,11 @@ func Run(identity Identity) error {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+
+	integrationKey, err := resolveIntegrationKey(identity.Type)
+	if err != nil {
+		return err
 	}
 
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
@@ -56,30 +63,36 @@ func Run(identity Identity) error {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(gin.Recovery(), requestIDMiddleware())
+	router.Use(platform.SafeRecoveryMiddleware(), platform.RequestIDMiddleware())
+
+	// Unauthenticated health endpoint
 	router.GET("/healthz", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 		if err := sqlDB.PingContext(ctx); err != nil {
-			c.Header("Retry-After", "5")
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
-				"code":       "SERVICE_UNAVAILABLE",
-				"message":    "The provider is temporarily unavailable.",
-				"retryable":  true,
-				"request_id": c.GetString("request_id"),
-				"details":    []any{},
-			}})
+			platform.RespondServiceUnavailable(c, "The provider is temporarily unavailable.")
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"status":          "UP",
-			"provider_id":     identity.ID,
-			"provider_type":   identity.Type,
-			"database_status": "UP",
-			"checked_at":      time.Now().UTC().Format(time.RFC3339Nano),
+		c.JSON(http.StatusOK, platform.HealthResponse{
+			Status:         "UP",
+			ProviderID:     identity.ID,
+			ProviderType:   identity.Type,
+			DatabaseStatus: "UP",
+			CheckedAt:      platform.FormatUTC(time.Now()),
 		})
 	})
+
+	// Authenticated v1 API group
+	v1 := router.Group("/v1")
+	v1.Use(platform.AuthMiddleware(integrationKey))
+
+	if identity.Type == "HOSPITAL" {
+		repo := hospital.NewRepository(db)
+		svc := hospital.NewService(identity.ID, repo)
+		handler := hospital.NewHandler(svc)
+		handler.RegisterRoutes(v1)
+	}
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -89,7 +102,7 @@ func Run(identity Identity) error {
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("%s provider listening on :%s", identity.Type, port)
+		log.Printf("%s provider (%s) listening on :%s", identity.Type, identity.ID, port)
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -113,22 +126,25 @@ func Run(identity Identity) error {
 	return nil
 }
 
-func requestIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		requestID := c.GetHeader("X-Request-ID")
-		if requestID == "" {
-			requestID = newRequestID()
-		}
-		c.Set("request_id", requestID)
-		c.Header("X-Request-ID", requestID)
-		c.Next()
+func resolveIntegrationKey(providerType string) (string, error) {
+	if key := os.Getenv("PROVIDER_INTEGRATION_KEY"); key != "" {
+		return key, nil
 	}
-}
-
-func newRequestID() string {
-	var value [12]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return fmt.Sprintf("req-%d", time.Now().UTC().UnixNano())
+	var envVar string
+	switch strings.ToUpper(providerType) {
+	case "HOSPITAL":
+		envVar = "HOSPITAL_INTEGRATION_KEY"
+	case "FERRY":
+		envVar = "FERRY_INTEGRATION_KEY"
+	case "HOTEL":
+		envVar = "HOTEL_INTEGRATION_KEY"
+	case "TRANSPORT":
+		envVar = "TRANSPORT_INTEGRATION_KEY"
+	default:
+		return "", fmt.Errorf("unknown provider type: %s", providerType)
 	}
-	return "req-" + hex.EncodeToString(value[:])
+	if key := os.Getenv(envVar); key != "" {
+		return key, nil
+	}
+	return "", fmt.Errorf("integration key is required (set PROVIDER_INTEGRATION_KEY or %s)", envVar)
 }
