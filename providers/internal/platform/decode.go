@@ -129,6 +129,15 @@ func ValidateLocationCode(code string) bool {
 	return serviceCodeRegex.MatchString(code) // same ^[A-Z][A-Z0-9_]*$ pattern
 }
 
+// ValidateDateFormat verifies that the date string matches YYYY-MM-DD.
+func ValidateDateFormat(dateStr string) bool {
+	if len(dateStr) != 10 {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", dateStr)
+	return err == nil
+}
+
 // ValidateMoney verifies that Money contains non-negative minor units and a valid 3-letter uppercase ISO currency.
 func ValidateMoney(m Money, fieldPrefix string) []ErrorDetail {
 	var details []ErrorDetail
