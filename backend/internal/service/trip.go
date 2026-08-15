@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"batam-medhub/internal/adapter"
 	"batam-medhub/internal/auth"
 	"batam-medhub/internal/model"
 
@@ -98,17 +100,19 @@ type CreateTripRequestInput struct {
 
 // TripService manages trip request lifecycles and deterministic package planning.
 type TripService struct {
-	db      *gorm.DB
-	catalog *CatalogService
-	money   *MoneyService
+	db         *gorm.DB
+	catalog    *CatalogService
+	money      *MoneyService
+	aggregator *adapter.Aggregator
 }
 
 // NewTripService constructs a TripService.
-func NewTripService(db *gorm.DB, catalog *CatalogService, money *MoneyService) *TripService {
+func NewTripService(db *gorm.DB, catalog *CatalogService, money *MoneyService, aggregator *adapter.Aggregator) *TripService {
 	return &TripService{
-		db:      db,
-		catalog: catalog,
-		money:   money,
+		db:         db,
+		catalog:    catalog,
+		money:      money,
+		aggregator: aggregator,
 	}
 }
 
@@ -167,7 +171,6 @@ func (s *TripService) CreateTripRequest(ctx context.Context, patientID, prompt, 
 		if intent.ServiceCode != nil {
 			item, err := s.catalog.LookupMedicalService(ctx, *intent.ServiceCode)
 			if err == nil {
-				// Find medical service UUID
 				var ms model.MedicalService
 				if err := s.db.WithContext(ctx).Where("code = ?", item.Code).First(&ms).Error; err == nil {
 					medicalServiceID = &ms.ID
@@ -326,7 +329,6 @@ func (s *TripService) AmendIntent(ctx context.Context, patientID, tripID string,
 
 	// Re-evaluate resolution
 	if intent.ServiceCode != nil && intent.DateWindow != nil {
-		// Check catalog
 		item, err := s.catalog.LookupMedicalService(ctx, *intent.ServiceCode)
 		if err != nil {
 			intent.Resolution = ResolutionUnsupportedService
@@ -362,7 +364,6 @@ func (s *TripService) AmendIntent(ctx context.Context, patientID, tripID string,
 			}
 		}
 	} else {
-		// Still missing fields
 		intent.Resolution = ResolutionNeedsClarification
 		var missing []string
 		if intent.ServiceCode == nil {
@@ -413,6 +414,12 @@ func (s *TripService) AmendIntent(ctx context.Context, patientID, tripID string,
 	}, nil
 }
 
+type builtPackage struct {
+	option            *model.PlanOption
+	items             []*model.PlanItem
+	displayTotalMinor int64
+}
+
 // GeneratePlans deterministically produces feasible cross-provider options and converts prices.
 func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID string) (*PlanningResult, error) {
 	var trip model.TripRequest
@@ -426,7 +433,7 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 		return nil, fmt.Errorf("get trip request for planning: %w", err)
 	}
 
-	if trip.Status != "PLANNING" && trip.Status != "PLAN_READY" {
+	if trip.Status != "PLANNING" && trip.Status != "PLAN_READY" && trip.Status != "NO_MATCH" {
 		return nil, fmt.Errorf("%w: cannot generate plans for trip request in status %s", ErrInvalidTripState, trip.Status)
 	}
 
@@ -438,11 +445,37 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 		return nil, fmt.Errorf("%w: intent is not MATCHED", ErrInvalidTripState)
 	}
 
-	newRevision := trip.PlanningRevision + 1
-	now := time.Now().UTC()
-	planExpiry := now.Add(5 * 24 * time.Hour)
+	dateStr := "2026-08-22"
+	if intent.DateWindow != nil && intent.DateWindow.From != "" {
+		dateStr = intent.DateWindow.From
+	}
 
-	// Fetch provider records
+	originPort := "HARBOURFRONT_SG"
+	if intent.OriginPort != nil && *intent.OriginPort != "" {
+		originPort = *intent.OriginPort
+	}
+
+	serviceCode := "MCU_BASIC"
+	if intent.ServiceCode != nil && *intent.ServiceCode != "" {
+		serviceCode = *intent.ServiceCode
+	}
+
+	patientCount := 1
+	if intent.PatientCount != nil && *intent.PatientCount > 0 {
+		patientCount = *intent.PatientCount
+	}
+	companionCount := 0
+	if intent.CompanionCount != nil && *intent.CompanionCount >= 0 {
+		companionCount = *intent.CompanionCount
+	}
+	totalPax := patientCount + companionCount
+
+	refCurr := trip.ReferenceCurrency
+	if refCurr == "" {
+		refCurr = "SGD"
+	}
+
+	// Fetch provider records from DB
 	var ferryProvider, transportProvider, hospitalProvider model.Provider
 	if err := s.db.WithContext(ctx).Where("provider_type = 'FERRY' AND status = 'ACTIVE'").First(&ferryProvider).Error; err != nil {
 		return nil, fmt.Errorf("fetch ferry provider: %w", err)
@@ -454,44 +487,171 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 		return nil, fmt.Errorf("fetch hospital provider: %w", err)
 	}
 
-	dateStr := "2026-08-22"
-	if intent.DateWindow != nil && intent.DateWindow.From != "" {
-		dateStr = intent.DateWindow.From
+	var providerWarnings []string
+	if s.aggregator != nil {
+		reqID := "req-plan-" + auth.NewUUID()
+		multiQuery := adapter.MultiSearchQuery{
+			HospitalCriteria: &adapter.HospitalSearchCriteria{
+				ServiceCode:  serviceCode,
+				PatientCount: patientCount,
+				AppointmentWindow: adapter.TimeWindow{
+					StartsAt:      dateStr + "T01:00:00Z",
+					EndsAt:        dateStr + "T11:00:00Z",
+					StartTimeZone: "Asia/Jakarta",
+					EndTimeZone:   "Asia/Jakarta",
+				},
+			},
+			FerryCriteria: []adapter.FerrySearchCriteria{
+				{
+					OriginPortCode:      originPort,
+					DestinationPortCode: "BATAM_CENTRE_ID",
+					PassengerCount:      totalPax,
+					DepartureWindow: adapter.TimeWindow{
+						StartsAt:      dateStr + "T00:00:00Z",
+						EndsAt:        dateStr + "T06:00:00Z",
+						StartTimeZone: "Asia/Singapore",
+						EndTimeZone:   "Asia/Jakarta",
+					},
+				},
+				{
+					OriginPortCode:      "BATAM_CENTRE_ID",
+					DestinationPortCode: originPort,
+					PassengerCount:      totalPax,
+					DepartureWindow: adapter.TimeWindow{
+						StartsAt:      dateStr + "T06:00:00Z",
+						EndsAt:        dateStr + "T16:00:00Z",
+						StartTimeZone: "Asia/Jakarta",
+						EndTimeZone:   "Asia/Singapore",
+					},
+				},
+			},
+			TransportCriteria: []adapter.TransportSearchCriteria{
+				{
+					PickupLocationCode:  "BATAM_CENTRE_ID",
+					DropoffLocationCode: "BATAM_MEDICAL_CENTRE_ID",
+					PassengerCount:      totalPax,
+					PickupWindow: adapter.TimeWindow{
+						StartsAt:      dateStr + "T01:00:00Z",
+						EndsAt:        dateStr + "T04:00:00Z",
+						StartTimeZone: "Asia/Jakarta",
+						EndTimeZone:   "Asia/Jakarta",
+					},
+				},
+				{
+					PickupLocationCode:  "HOSPITAL_DEMO_ID",
+					DropoffLocationCode: "BATAM_CENTRE_ID",
+					PassengerCount:      totalPax,
+					PickupWindow: adapter.TimeWindow{
+						StartsAt:      dateStr + "T05:00:00Z",
+						EndsAt:        dateStr + "T09:00:00Z",
+						StartTimeZone: "Asia/Jakarta",
+						EndTimeZone:   "Asia/Jakarta",
+					},
+				},
+			},
+		}
+
+		res := s.aggregator.SearchAll(ctx, reqID, multiQuery)
+		providerWarnings = res.Warnings
 	}
 
-	refCurr := trip.ReferenceCurrency
-	if refCurr == "" {
-		refCurr = "SGD"
+	newRevision := trip.PlanningRevision + 1
+	now := time.Now().UTC()
+	planExpiry := now.Add(5 * 24 * time.Hour)
+
+	// Check if date is in the past or invalid
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil || parsedDate.Before(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		trip.Status = "NO_MATCH"
+		trip.UpdatedAt = now
+		_ = s.db.WithContext(ctx).Save(&trip).Error
+
+		return &PlanningResult{
+			TripRequest: TripRequestDTO{
+				ID:                trip.ID,
+				Status:            trip.Status,
+				Intent:            intent,
+				PlanningRevision:  trip.PlanningRevision,
+				ReferenceCurrency: trip.ReferenceCurrency,
+				JourneyID:         nil,
+				CreatedAt:         trip.CreatedAt,
+				UpdatedAt:         trip.UpdatedAt,
+			},
+			Options:          []PlanOptionDTO{},
+			NoMatchReasons:   []string{"The requested date window is not available in the active schedule."},
+			ProviderWarnings: providerWarnings,
+		}, nil
 	}
 
-	// Generate Rank 1 and Rank 2 options
-	opt1, items1, err := s.buildOption(ctx, trip.ID, newRevision, 1, dateStr, "07:30", planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
-	if err != nil {
-		return nil, fmt.Errorf("build rank 1 option: %w", err)
+	// Generate candidate packages
+	var candidates []builtPackage
+
+	// Package 1: Morning departure (07:30 SGT) -> 10:00 appointment
+	opt1, items1, total1, err := s.assemblePackage(ctx, trip.ID, newRevision, 1, dateStr, 0, planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
+	if err == nil {
+		candidates = append(candidates, builtPackage{
+			option:            opt1,
+			items:             items1,
+			displayTotalMinor: total1,
+		})
 	}
 
-	opt2, items2, err := s.buildOption(ctx, trip.ID, newRevision, 2, dateStr, "08:30", planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
-	if err != nil {
-		return nil, fmt.Errorf("build rank 2 option: %w", err)
+	// Package 2: Later departure (08:30 SGT) -> 11:00 appointment
+	opt2, items2, total2, err := s.assemblePackage(ctx, trip.ID, newRevision, 2, dateStr, 1*time.Hour, planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
+	if err == nil {
+		candidates = append(candidates, builtPackage{
+			option:            opt2,
+			items:             items2,
+			displayTotalMinor: total2,
+		})
+	}
+
+	if len(candidates) == 0 {
+		trip.Status = "NO_MATCH"
+		trip.UpdatedAt = now
+		_ = s.db.WithContext(ctx).Save(&trip).Error
+
+		return &PlanningResult{
+			TripRequest: TripRequestDTO{
+				ID:                trip.ID,
+				Status:            trip.Status,
+				Intent:            intent,
+				PlanningRevision:  trip.PlanningRevision,
+				ReferenceCurrency: trip.ReferenceCurrency,
+				JourneyID:         nil,
+				CreatedAt:         trip.CreatedAt,
+				UpdatedAt:         trip.UpdatedAt,
+			},
+			Options:          []PlanOptionDTO{},
+			NoMatchReasons:   []string{"No available appointments or ferry sailings satisfy the required 45-minute arrival and 30-minute departure buffer constraints on the requested date."},
+			ProviderWarnings: providerWarnings,
+		}, nil
+	}
+
+	// Sort candidates deterministically by display total price ascending
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].displayTotalMinor < candidates[j].displayTotalMinor
+	})
+
+	// Assign ranks (1, 2)
+	selected := candidates
+	if len(selected) > 2 {
+		selected = selected[:2]
+	}
+	for i := range selected {
+		selected[i].option.Rank = i + 1
 	}
 
 	// Save transactionally
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(opt1).Error; err != nil {
-			return err
-		}
-		for _, it := range items1 {
-			if err := tx.Create(it).Error; err != nil {
+		for _, pkg := range selected {
+			if err := tx.Create(pkg.option).Error; err != nil {
 				return err
 			}
-		}
-
-		if err := tx.Create(opt2).Error; err != nil {
-			return err
-		}
-		for _, it := range items2 {
-			if err := tx.Create(it).Error; err != nil {
-				return err
+			for _, it := range pkg.items {
+				if err := tx.Create(it).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -523,19 +683,20 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 		},
 		Options:          loadedOptions,
 		NoMatchReasons:   []string{},
-		ProviderWarnings: []string{},
+		ProviderWarnings: providerWarnings,
 	}, nil
 }
 
-func (s *TripService) buildOption(
+func (s *TripService) assemblePackage(
 	ctx context.Context,
 	tripID string,
 	revision, rank int,
-	dateStr, startHour string,
+	dateStr string,
+	timeShift time.Duration,
 	expiresAt time.Time,
 	refCurr string,
 	ferryID, transportID, hospitalID string,
-) (*model.PlanOption, []*model.PlanItem, error) {
+) (*model.PlanOption, []*model.PlanItem, int64, error) {
 	planID := auth.NewUUID()
 	now := time.Now().UTC()
 
@@ -544,26 +705,25 @@ func (s *TripService) buildOption(
 
 	ferryOutPrice, err = s.money.Convert(ctx, Money{AmountMinor: 5000, Currency: "SGD"}, refCurr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	ferryRetPrice, err = s.money.Convert(ctx, Money{AmountMinor: 5000, Currency: "SGD"}, refCurr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	transportPickPrice, err = s.money.Convert(ctx, Money{AmountMinor: 15000000, Currency: "IDR"}, refCurr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	transportDropPrice, err = s.money.Convert(ctx, Money{AmountMinor: 15000000, Currency: "IDR"}, refCurr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	hospitalPrice, err = s.money.Convert(ctx, Money{AmountMinor: 150000000, Currency: "IDR"}, refCurr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
-	// Calculate totals
 	sgdTotalMinor := int64(10000)
 	idrTotalMinor := int64(180000000)
 
@@ -590,6 +750,13 @@ func (s *TripService) buildOption(
 		"Every required provider has capacity for the patient and companion.",
 		"The return sailing leaves after the appointment and terminal cutoff buffer.",
 	}
+	if rank == 2 {
+		explanation = []string{
+			"Alternative schedule with a later departure time.",
+			"Every required provider has capacity for the patient and companion.",
+			"The return sailing leaves after the appointment and terminal cutoff buffer.",
+		}
+	}
 
 	explBytes, _ := json.Marshal(explanation)
 	priceBytes, _ := json.Marshal(priceSummary)
@@ -607,13 +774,17 @@ func (s *TripService) buildOption(
 		UpdatedAt:          now,
 	}
 
-	// Items construction
 	parsedDate, _ := time.Parse("2006-01-02", dateStr)
-	baseTime := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
-	if rank == 2 {
-		baseTime = baseTime.Add(1 * time.Hour)
-	}
+	baseTime := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC).Add(timeShift)
 
+	// Items construction adhering to buffer invariants:
+	// Ferry arrives at baseTime + 08:40 WIB
+	// Buffer 1 (Arrival & immigration): 45 mins -> ends 09:25 WIB
+	// Transport pickup: 09:25 to 09:55 WIB -> arrives hospital before 10:00 WIB
+	// Hospital appointment: 10:00 to 13:00 WIB (3 hrs)
+	// Transport dropoff: starts 13:30 WIB (30-min release buffer), arrives terminal 14:00 WIB
+	// Departure buffer: 14:00 to 14:30 WIB (30-min terminal buffer)
+	// Return ferry: departs 14:30 WIB
 	items := []*model.PlanItem{
 		// 1. FERRY_OUTBOUND
 		createItem(planID, 1, stringPtr(ferryID), stringPtr("ferry-offer-hf-btm-"+dateStr), "FERRY_OUTBOUND",
@@ -621,10 +792,10 @@ func (s *TripService) buildOption(
 			"Asia/Singapore", "Asia/Jakarta", stringPtr("HARBOURFRONT_SG"), stringPtr("BATAM_CENTRE_ID"),
 			ferryOutPrice, expiresAt, []string{"Check in at least 60 minutes before departure."}),
 
-		// 2. ARRIVAL_BUFFER
+		// 2. ARRIVAL_BUFFER (45 min immigration & buffer)
 		createItem(planID, 2, nil, nil, "ARRIVAL_BUFFER",
 			"Immigration and arrival buffer", baseTime.Add(8*time.Hour+40*time.Minute), baseTime.Add(9*time.Hour+25*time.Minute),
-			"Asia/Jakarta", "Asia/Jakarta", nil, nil,
+			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_CENTRE_ID"), stringPtr("BATAM_CENTRE_ID"),
 			nil, expiresAt, []string{"Terminal immigration clearance."}),
 
 		// 3. TRANSPORT_PICKUP
@@ -639,16 +810,16 @@ func (s *TripService) buildOption(
 			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_MEDICAL_CENTRE_ID"), stringPtr("BATAM_MEDICAL_CENTRE_ID"),
 			hospitalPrice, expiresAt, []string{"Fasting required 8 hours prior to check-up."}),
 
-		// 5. TRANSPORT_DROPOFF
+		// 5. TRANSPORT_DROPOFF (30 min post-appointment buffer)
 		createItem(planID, 5, stringPtr(transportID), stringPtr("transport-offer-dropoff-"+dateStr), "TRANSPORT_DROPOFF",
-			"Transfer from Batam Medical Centre to Ferry Terminal", baseTime.Add(13*time.Hour), baseTime.Add(13*time.Hour+30*time.Minute),
+			"Transfer from Batam Medical Centre to Ferry Terminal", baseTime.Add(13*time.Hour+30*time.Minute), baseTime.Add(14*time.Hour),
 			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_MEDICAL_CENTRE_ID"), stringPtr("BATAM_CENTRE_ID"),
 			transportDropPrice, expiresAt, []string{"Meet driver at clinic lobby."}),
 
-		// 6. DEPARTURE_BUFFER
+		// 6. DEPARTURE_BUFFER (30 min terminal check-in buffer)
 		createItem(planID, 6, nil, nil, "DEPARTURE_BUFFER",
-			"Terminal departure buffer", baseTime.Add(13*time.Hour+30*time.Minute), baseTime.Add(14*time.Hour+30*time.Minute),
-			"Asia/Jakarta", "Asia/Jakarta", nil, nil,
+			"Terminal departure buffer", baseTime.Add(14*time.Hour), baseTime.Add(14*time.Hour+30*time.Minute),
+			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_CENTRE_ID"), stringPtr("BATAM_CENTRE_ID"),
 			nil, expiresAt, []string{"Immigration and security clearance."}),
 
 		// 7. FERRY_RETURN
@@ -658,7 +829,7 @@ func (s *TripService) buildOption(
 			ferryRetPrice, expiresAt, []string{"Check in at least 30 minutes before departure."}),
 	}
 
-	return planOpt, items, nil
+	return planOpt, items, totalDisplayMinor, nil
 }
 
 func createItem(

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"batam-medhub/internal/adapter"
 	"batam-medhub/internal/config"
 	"batam-medhub/internal/service"
 
@@ -93,7 +94,14 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	catalogSvc := service.NewCatalogService(db)
 	moneySvc := service.NewMoneyService(db)
 	idemSvc := service.NewIdempotencyService(db)
-	tripSvc := service.NewTripService(db, catalogSvc, moneySvc)
+
+	hospAdapter := adapter.NewHospitalAdapter(cfg.HospitalBaseURL, cfg.HospitalIntegrationKey, cfg.ProviderTimeout)
+	ferryAdapter := adapter.NewFerryAdapter(cfg.FerryBaseURL, cfg.FerryIntegrationKey, cfg.ProviderTimeout)
+	hotelAdapter := adapter.NewHotelAdapter(cfg.HotelBaseURL, cfg.HotelIntegrationKey, cfg.ProviderTimeout)
+	transAdapter := adapter.NewTransportAdapter(cfg.TransportBaseURL, cfg.TransportIntegrationKey, cfg.ProviderTimeout)
+	aggregator := adapter.NewAggregator(hospAdapter, ferryAdapter, hotelAdapter, transAdapter)
+
+	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator)
 
 	registerLimiter := newIPRateLimiter(30, time.Minute)
 	loginLimiter := newIPRateLimiter(30, time.Minute)
