@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"batam-medhub/internal/model"
@@ -15,6 +16,7 @@ import (
 var (
 	ErrUnsupportedCurrency = errors.New("unsupported currency")
 	ErrFXRateNotFound      = errors.New("exchange rate not found")
+	ErrInvalidAmount       = errors.New("amount must be non-negative")
 )
 
 // Money represents an amount in minor units (e.g. cents) with an ISO currency code.
@@ -43,8 +45,29 @@ func NewMoneyService(db *gorm.DB) *MoneyService {
 	return &MoneyService{db: db}
 }
 
+// canonicalizeFXRate formats the exchange rate string to preserve at least 6 decimal places
+// while trimming any superfluous trailing zeros beyond 6 decimal digits.
+func canonicalizeFXRate(raw string) string {
+	raw = strings.TrimSpace(raw)
+	dotIdx := strings.IndexByte(raw, '.')
+	if dotIdx == -1 {
+		return raw + ".000000"
+	}
+	intPart := raw[:dotIdx]
+	fracPart := raw[dotIdx+1:]
+	if len(fracPart) < 6 {
+		fracPart = fracPart + strings.Repeat("0", 6-len(fracPart))
+		return intPart + "." + fracPart
+	}
+	trimmedFrac := strings.TrimRight(fracPart[6:], "0")
+	return intPart + "." + fracPart[:6] + trimmedFrac
+}
+
 // Convert converts source money into target display currency using exact rational decimal arithmetic against seeded FX rows.
 func (s *MoneyService) Convert(ctx context.Context, source Money, targetCurrency string) (*ConvertedMoney, error) {
+	if source.AmountMinor < 0 {
+		return nil, fmt.Errorf("%w: %d", ErrInvalidAmount, source.AmountMinor)
+	}
 	if targetCurrency != "SGD" && targetCurrency != "IDR" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCurrency, targetCurrency)
 	}
@@ -97,7 +120,7 @@ func (s *MoneyService) Convert(ctx context.Context, source Money, targetCurrency
 			AmountMinor: roundedInt.Int64(),
 			Currency:    targetCurrency,
 		},
-		FXRate:        fx.Rate,
+		FXRate:        canonicalizeFXRate(fx.Rate),
 		FXSource:      fx.Source,
 		FXEffectiveAt: fx.EffectiveAt,
 		Estimated:     true,

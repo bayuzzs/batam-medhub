@@ -74,7 +74,7 @@ func IssueAccessToken(secret, issuer, audience, patientID, sessionID, preferredC
 }
 
 // ValidateAccessToken parses and validates an HS256 JWT access token.
-func ValidateAccessToken(tokenString, secret, expectedIssuer, expectedAudience string) (*JWTClaims, error) {
+func ValidateAccessToken(tokenString, secret, expectedIssuer, expectedAudience string, expectedTTL time.Duration) (*JWTClaims, error) {
 	parts := strings.Split(tokenString, ".")
 	if len(parts) != 3 {
 		return nil, ErrInvalidToken
@@ -121,27 +121,24 @@ func ValidateAccessToken(tokenString, secret, expectedIssuer, expectedAudience s
 		return nil, ErrInvalidTokenAudience
 	}
 
-	const (
-		clockSkewSeconds    = int64(60)   // 60 seconds allowable clock skew
-		maxAllowedTTLSeconds = int64(3600) // Maximum 1 hour token lifespan per OpenAPI spec
-	)
+	const clockSkewSeconds = int64(60) // 60 seconds allowable clock skew for future iat
 
 	if claims.IssuedAt <= 0 || claims.ExpiresAt <= 0 {
 		return nil, ErrInvalidClaims
 	}
-	if claims.IssuedAt > claims.ExpiresAt {
+	if claims.ExpiresAt <= claims.IssuedAt {
 		return nil, ErrInvalidClaims
 	}
-	if (claims.ExpiresAt - claims.IssuedAt) > (maxAllowedTTLSeconds + clockSkewSeconds) {
+	if expectedTTL > 0 && (claims.ExpiresAt-claims.IssuedAt) != int64(expectedTTL.Seconds()) {
 		return nil, ErrInvalidClaims
 	}
 
 	now := time.Now().UTC().Unix()
 	if claims.IssuedAt > (now + clockSkewSeconds) {
-		return nil, ErrInvalidClaims // Token claims to be issued in the future
+		return nil, ErrInvalidClaims // Token claims to be issued in the future beyond clock skew
 	}
-	if claims.ExpiresAt <= (now - clockSkewSeconds) {
-		return nil, ErrTokenExpired
+	if now >= claims.ExpiresAt {
+		return nil, ErrTokenExpired // Strictly expired (no clock skew grace period on expiry)
 	}
 
 	if claims.Subject == "" || claims.SessionID == "" || (claims.PreferredCurrency != "SGD" && claims.PreferredCurrency != "IDR") {

@@ -47,7 +47,7 @@ func patientBearerAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 		}
 
 		rawToken := strings.TrimSpace(parts[1])
-		claims, err := auth.ValidateAccessToken(rawToken, cfg.JWTSigningSecret, cfg.JWTIssuer, cfg.JWTAudience)
+		claims, err := auth.ValidateAccessToken(rawToken, cfg.JWTSigningSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTAccessTTL)
 		if err != nil {
 			abort(c, &apiError{
 				status:  http.StatusUnauthorized,
@@ -142,7 +142,7 @@ func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
-	// Prune expired entries if capacity threshold is reached
+	// 1. Prune expired entries across all IPs if map is approaching/at capacity
 	if len(rl.clients) >= maxRateLimiterEntries {
 		for k, v := range rl.clients {
 			valid := make([]time.Time, 0, len(v))
@@ -159,7 +159,7 @@ func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
 		}
 	}
 
-	timestamps := rl.clients[ip]
+	timestamps, exists := rl.clients[ip]
 	valid := make([]time.Time, 0, len(timestamps))
 	for _, t := range timestamps {
 		if t.After(cutoff) {
@@ -167,6 +167,30 @@ func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
 		}
 	}
 
+	// 2. If client is new and map still contains 10,000 active entries after pruning, evict the oldest entry
+	if !exists && len(rl.clients) >= maxRateLimiterEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		first := true
+		for k, v := range rl.clients {
+			if len(v) > 0 {
+				lastTime := v[len(v)-1]
+				if first || lastTime.Before(oldestTime) {
+					oldestTime = lastTime
+					oldestKey = k
+					first = false
+				}
+			} else {
+				oldestKey = k
+				break
+			}
+		}
+		if oldestKey != "" {
+			delete(rl.clients, oldestKey)
+		}
+	}
+
+	// 3. Check limit
 	if len(valid) >= rl.limit {
 		rl.clients[ip] = valid
 		retryAfter := valid[0].Add(rl.window).Sub(now)

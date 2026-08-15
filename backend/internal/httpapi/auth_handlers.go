@@ -22,13 +22,44 @@ func handleRegister(svc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		if strings.TrimSpace(req.FullName) == "" || strings.TrimSpace(req.Email) == "" || req.Password == "" {
+		fullName := strings.TrimSpace(req.FullName)
+		if len(fullName) < 2 || len(fullName) > 120 {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
-				message: "Missing required registration fields.",
+				message: "full_name must be between 2 and 120 characters.",
 			})
 			return
+		}
+
+		if !isValidEmail(req.Email) {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "email must be a valid email address.",
+			})
+			return
+		}
+
+		if !isValidPassword(req.Password) {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "password must be between 8 and 72 UTF-8 bytes.",
+			})
+			return
+		}
+
+		if req.PreferredCurrency != "" {
+			curr := strings.ToUpper(strings.TrimSpace(req.PreferredCurrency))
+			if curr != "SGD" && curr != "IDR" {
+				abort(c, &apiError{
+					status:  http.StatusBadRequest,
+					code:    "BAD_REQUEST",
+					message: "preferred_currency must be SGD or IDR.",
+				})
+				return
+			}
 		}
 
 		session, err := svc.Register(c.Request.Context(), req)
@@ -75,11 +106,11 @@ func handleLogin(svc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		if strings.TrimSpace(req.Email) == "" || req.Password == "" {
+		if !isValidEmail(req.Email) || !isValidPassword(req.Password) {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
-				message: "Missing required login fields.",
+				message: "Invalid login payload format.",
 			})
 			return
 		}
@@ -119,11 +150,11 @@ func handleRefresh(svc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		if strings.TrimSpace(req.RefreshToken) == "" {
+		if !isValidRefreshToken(req.RefreshToken) {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
-				message: "Missing required refresh_token field.",
+				message: "refresh_token must be between 43 and 256 characters.",
 			})
 			return
 		}
@@ -163,11 +194,11 @@ func handleLogout(svc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		if strings.TrimSpace(req.RefreshToken) == "" {
+		if !isValidRefreshToken(req.RefreshToken) {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
-				message: "Missing required refresh_token field.",
+				message: "refresh_token must be between 43 and 256 characters.",
 			})
 			return
 		}
