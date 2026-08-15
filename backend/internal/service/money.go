@@ -27,6 +27,7 @@ type Money struct {
 
 // ConvertedMoney represents money converted to a display currency with conversion metadata.
 type ConvertedMoney struct {
+	FXRateID      string    `json:"-"`
 	Source        Money     `json:"source"`
 	Display       Money     `json:"display"`
 	FXRate        string    `json:"fx_rate"`
@@ -115,7 +116,8 @@ func (s *MoneyService) Convert(ctx context.Context, source Money, targetCurrency
 	}
 
 	return &ConvertedMoney{
-		Source: source,
+		FXRateID: fx.ID,
+		Source:   source,
 		Display: Money{
 			AmountMinor: roundedInt.Int64(),
 			Currency:    targetCurrency,
