@@ -120,27 +120,38 @@ func (s *Service) SearchOffers(ctx context.Context, req SearchRequestPayload, no
 	}
 
 	crit := req.Criteria
-	if !serviceCodeRegex.MatchString(crit.ServiceCode) {
-		return nil, []platform.ErrorDetail{{Field: "criteria.service_code", Reason: "is invalid or missing"}}, ErrInvalidRequest
+	var details []platform.ErrorDetail
+
+	if !platform.ValidateServiceCode(crit.ServiceCode) {
+		details = append(details, platform.ErrorDetail{Field: "criteria.service_code", Reason: "is invalid or missing"})
 	}
 	if crit.PatientCount < 1 || crit.PatientCount > 20 {
-		return nil, []platform.ErrorDetail{{Field: "criteria.patient_count", Reason: "must be between 1 and 20"}}, ErrInvalidRequest
+		details = append(details, platform.ErrorDetail{Field: "criteria.patient_count", Reason: "must be between 1 and 20"})
 	}
-	if !ianaTimeZoneRegex.MatchString(crit.AppointmentWindow.StartTimeZone) {
-		return nil, []platform.ErrorDetail{{Field: "criteria.appointment_window.start_time_zone", Reason: "must be a valid IANA time zone"}}, ErrInvalidRequest
+	if !platform.ValidateIanaTimezone(crit.AppointmentWindow.StartTimeZone) {
+		details = append(details, platform.ErrorDetail{Field: "criteria.appointment_window.start_time_zone", Reason: "must be a valid IANA time zone"})
 	}
-	if !ianaTimeZoneRegex.MatchString(crit.AppointmentWindow.EndTimeZone) {
-		return nil, []platform.ErrorDetail{{Field: "criteria.appointment_window.end_time_zone", Reason: "must be a valid IANA time zone"}}, ErrInvalidRequest
+	if !platform.ValidateIanaTimezone(crit.AppointmentWindow.EndTimeZone) {
+		details = append(details, platform.ErrorDetail{Field: "criteria.appointment_window.end_time_zone", Reason: "must be a valid IANA time zone"})
 	}
 
-	windowStart, err := time.Parse(time.RFC3339, crit.AppointmentWindow.StartsAt)
-	if err != nil {
-		return nil, []platform.ErrorDetail{{Field: "criteria.appointment_window.starts_at", Reason: "must be an RFC 3339 UTC timestamp"}}, ErrInvalidRequest
+	if !platform.ValidateRFC3339UTC(crit.AppointmentWindow.StartsAt) {
+		details = append(details, platform.ErrorDetail{Field: "criteria.appointment_window.starts_at", Reason: "must be an RFC 3339 UTC timestamp ending in 'Z'"})
 	}
-	windowEnd, err := time.Parse(time.RFC3339, crit.AppointmentWindow.EndsAt)
-	if err != nil {
-		return nil, []platform.ErrorDetail{{Field: "criteria.appointment_window.ends_at", Reason: "must be an RFC 3339 UTC timestamp"}}, ErrInvalidRequest
+	if !platform.ValidateRFC3339UTC(crit.AppointmentWindow.EndsAt) {
+		details = append(details, platform.ErrorDetail{Field: "criteria.appointment_window.ends_at", Reason: "must be an RFC 3339 UTC timestamp ending in 'Z'"})
 	}
+
+	if len(crit.Accessibility) > 0 {
+		details = append(details, platform.ValidateAccessibility(crit.Accessibility, "criteria.accessibility")...)
+	}
+
+	if len(details) > 0 {
+		return nil, details, ErrInvalidRequest
+	}
+
+	windowStart, _ := time.Parse(time.RFC3339, crit.AppointmentWindow.StartsAt)
+	windowEnd, _ := time.Parse(time.RFC3339, crit.AppointmentWindow.EndsAt)
 	if !windowStart.Before(windowEnd) {
 		return nil, []platform.ErrorDetail{{Field: "criteria.appointment_window", Reason: "starts_at must precede ends_at"}}, ErrInvalidRequest
 	}
@@ -231,26 +242,39 @@ func (s *Service) CreateHold(
 		return nil, false, nil, nil, nil, ErrProviderIdentityMismatch
 	}
 
+	var details []platform.ErrorDetail
+
 	if req.BookingRequirements != nil && string(*req.BookingRequirements) != "null" && string(*req.BookingRequirements) != "" {
-		return nil, false, nil, nil, []platform.ErrorDetail{
-			{Field: "booking_requirements", Reason: "is rejected for HOSPITAL provider type"},
-		}, ErrInvalidRequest
+		details = append(details, platform.ErrorDetail{
+			Field:  "booking_requirements",
+			Reason: "is rejected for HOSPITAL provider type",
+		})
 	}
 
 	if req.Units < 1 || req.Units > 20 {
-		return nil, false, nil, nil, []platform.ErrorDetail{
-			{Field: "units", Reason: "must be between 1 and 20"},
-		}, ErrInvalidRequest
+		details = append(details, platform.ErrorDetail{
+			Field:  "units",
+			Reason: "must be between 1 and 20",
+		})
 	}
-	if req.OfferID == "" {
-		return nil, false, nil, nil, []platform.ErrorDetail{
-			{Field: "offer_id", Reason: "is required"},
-		}, ErrInvalidRequest
+	if !platform.ValidateResourceId(req.OfferID) {
+		details = append(details, platform.ErrorDetail{
+			Field:  "offer_id",
+			Reason: "is invalid or missing",
+		})
 	}
-	if req.ClientReference == "" {
-		return nil, false, nil, nil, []platform.ErrorDetail{
-			{Field: "client_reference", Reason: "is required"},
-		}, ErrInvalidRequest
+	if !platform.ValidateClientReference(req.ClientReference) {
+		details = append(details, platform.ErrorDetail{
+			Field:  "client_reference",
+			Reason: "is invalid or missing",
+		})
+	}
+
+	moneyDetails := platform.ValidateMoney(req.ExpectedUnitPrice, "expected_unit_price")
+	details = append(details, moneyDetails...)
+
+	if len(details) > 0 {
+		return nil, false, nil, nil, details, ErrInvalidRequest
 	}
 
 	result, err := s.repo.CreateHoldTx(ctx, CreateHoldParams{

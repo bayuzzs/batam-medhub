@@ -37,7 +37,10 @@ func Run(identity Identity) error {
 		port = "8080"
 	}
 
-	integrationKey := resolveIntegrationKey(identity.Type)
+	integrationKey, err := resolveIntegrationKey(identity.Type)
+	if err != nil {
+		return err
+	}
 
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -60,7 +63,7 @@ func Run(identity Identity) error {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(gin.Recovery(), platform.RequestIDMiddleware())
+	router.Use(platform.SafeRecoveryMiddleware(), platform.RequestIDMiddleware())
 
 	// Unauthenticated health endpoint
 	router.GET("/healthz", func(c *gin.Context) {
@@ -123,32 +126,25 @@ func Run(identity Identity) error {
 	return nil
 }
 
-func resolveIntegrationKey(providerType string) string {
+func resolveIntegrationKey(providerType string) (string, error) {
 	if key := os.Getenv("PROVIDER_INTEGRATION_KEY"); key != "" {
-		return key
+		return key, nil
 	}
+	var envVar string
 	switch strings.ToUpper(providerType) {
 	case "HOSPITAL":
-		if key := os.Getenv("HOSPITAL_INTEGRATION_KEY"); key != "" {
-			return key
-		}
-		return "hospital_dev_secret"
+		envVar = "HOSPITAL_INTEGRATION_KEY"
 	case "FERRY":
-		if key := os.Getenv("FERRY_INTEGRATION_KEY"); key != "" {
-			return key
-		}
-		return "ferry_dev_secret"
+		envVar = "FERRY_INTEGRATION_KEY"
 	case "HOTEL":
-		if key := os.Getenv("HOTEL_INTEGRATION_KEY"); key != "" {
-			return key
-		}
-		return "hotel_dev_secret"
+		envVar = "HOTEL_INTEGRATION_KEY"
 	case "TRANSPORT":
-		if key := os.Getenv("TRANSPORT_INTEGRATION_KEY"); key != "" {
-			return key
-		}
-		return "transport_dev_secret"
+		envVar = "TRANSPORT_INTEGRATION_KEY"
 	default:
-		return "dev_secret"
+		return "", fmt.Errorf("unknown provider type: %s", providerType)
 	}
+	if key := os.Getenv(envVar); key != "" {
+		return key, nil
+	}
+	return "", fmt.Errorf("integration key is required (set PROVIDER_INTEGRATION_KEY or %s)", envVar)
 }

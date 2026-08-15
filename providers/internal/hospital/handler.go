@@ -1,7 +1,6 @@
 package hospital
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,11 +30,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 func (h *Handler) SearchOffers(c *gin.Context) {
-	var payload SearchRequestPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
+	bodyBytes, err := platform.ReadAndRestoreBody(c)
+	if err != nil {
 		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
-			{Reason: err.Error()},
+			{Reason: "failed to read request body"},
 		})
+		return
+	}
+
+	payload, details, err := platform.DecodeStrictJSON[SearchRequestPayload](bodyBytes, platform.DefaultMaxBodyBytes)
+	if err != nil {
+		platform.RespondBadRequest(c, "The request failed validation.", details)
 		return
 	}
 
@@ -69,11 +74,9 @@ func (h *Handler) CreateHold(c *gin.Context) {
 		return
 	}
 
-	var payload CreateHoldRequestPayload
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
-			{Reason: err.Error()},
-		})
+	payload, details, err := platform.DecodeStrictJSON[CreateHoldRequestPayload](bodyBytes, platform.DefaultMaxBodyBytes)
+	if err != nil {
+		platform.RespondBadRequest(c, "The request failed validation.", details)
 		return
 	}
 
@@ -131,6 +134,14 @@ func (h *Handler) CreateHold(c *gin.Context) {
 }
 
 func (h *Handler) ConfirmHold(c *gin.Context) {
+	holdID := c.Param("hold_id")
+	if !platform.ValidateResourceId(holdID) {
+		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
+			{Field: "hold_id", Reason: "is invalid"},
+		})
+		return
+	}
+
 	idempKey := c.GetHeader("Idempotency-Key")
 	if !platform.ValidateIdempotencyKey(idempKey) {
 		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
@@ -147,7 +158,6 @@ func (h *Handler) ConfirmHold(c *gin.Context) {
 		return
 	}
 
-	holdID := c.Param("hold_id")
 	fingerprint := platform.ComputeFingerprint("POST", c.FullPath(), bodyBytes)
 
 	resp, replayed, expiredDetails, err := h.service.ConfirmHold(
@@ -189,6 +199,14 @@ func (h *Handler) ConfirmHold(c *gin.Context) {
 }
 
 func (h *Handler) ReleaseHold(c *gin.Context) {
+	holdID := c.Param("hold_id")
+	if !platform.ValidateResourceId(holdID) {
+		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
+			{Field: "hold_id", Reason: "is invalid"},
+		})
+		return
+	}
+
 	idempKey := c.GetHeader("Idempotency-Key")
 	if !platform.ValidateIdempotencyKey(idempKey) {
 		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
@@ -205,7 +223,6 @@ func (h *Handler) ReleaseHold(c *gin.Context) {
 		return
 	}
 
-	holdID := c.Param("hold_id")
 	fingerprint := platform.ComputeFingerprint("POST", c.FullPath(), bodyBytes)
 
 	resp, replayed, err := h.service.ReleaseHold(
@@ -236,6 +253,13 @@ func (h *Handler) ReleaseHold(c *gin.Context) {
 
 func (h *Handler) GetReservation(c *gin.Context) {
 	reservationID := c.Param("reservation_id")
+	if !platform.ValidateResourceId(reservationID) {
+		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
+			{Field: "reservation_id", Reason: "is invalid"},
+		})
+		return
+	}
+
 	resp, err := h.service.GetReservation(c.Request.Context(), reservationID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -250,6 +274,14 @@ func (h *Handler) GetReservation(c *gin.Context) {
 }
 
 func (h *Handler) ReleaseReservation(c *gin.Context) {
+	reservationID := c.Param("reservation_id")
+	if !platform.ValidateResourceId(reservationID) {
+		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
+			{Field: "reservation_id", Reason: "is invalid"},
+		})
+		return
+	}
+
 	idempKey := c.GetHeader("Idempotency-Key")
 	if !platform.ValidateIdempotencyKey(idempKey) {
 		platform.RespondBadRequest(c, "The request failed validation.", []platform.ErrorDetail{
@@ -266,7 +298,6 @@ func (h *Handler) ReleaseReservation(c *gin.Context) {
 		return
 	}
 
-	reservationID := c.Param("reservation_id")
 	fingerprint := platform.ComputeFingerprint("POST", c.FullPath(), bodyBytes)
 
 	resp, replayed, err := h.service.ReleaseReservation(

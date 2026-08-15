@@ -193,6 +193,11 @@ func (r *Repository) CreateHoldTx(ctx context.Context, params CreateHoldParams) 
 	}
 	defer tx.Rollback()
 
+	lockKey := fmt.Sprintf("%s:%s:%s", params.ClientScope, params.Operation, params.IdempotencyKey)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockKey).Error; err != nil {
+		return nil, fmt.Errorf("acquire advisory lock: %w", err)
+	}
+
 	// Check idempotency first inside transaction
 	var existingRecord IdempotencyRecord
 	err := tx.Where("client_scope = ? AND operation = ? AND idempotency_key = ?",
@@ -339,6 +344,11 @@ func (r *Repository) ConfirmHoldTx(ctx context.Context, params ConfirmHoldParams
 	}
 	defer tx.Rollback()
 
+	lockKey := fmt.Sprintf("%s:%s:%s", params.ClientScope, params.Operation, params.IdempotencyKey)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockKey).Error; err != nil {
+		return nil, fmt.Errorf("acquire advisory lock: %w", err)
+	}
+
 	// Check idempotency first inside transaction
 	var existingRecord IdempotencyRecord
 	err := tx.Where("client_scope = ? AND operation = ? AND idempotency_key = ?",
@@ -482,6 +492,11 @@ func (r *Repository) ReleaseHoldTx(ctx context.Context, params ReleaseHoldParams
 	}
 	defer tx.Rollback()
 
+	lockKey := fmt.Sprintf("%s:%s:%s", params.ClientScope, params.Operation, params.IdempotencyKey)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockKey).Error; err != nil {
+		return nil, fmt.Errorf("acquire advisory lock: %w", err)
+	}
+
 	// Check idempotency first inside transaction
 	var existingRecord IdempotencyRecord
 	err := tx.Where("client_scope = ? AND operation = ? AND idempotency_key = ?",
@@ -598,6 +613,11 @@ func (r *Repository) ReleaseReservationTx(ctx context.Context, params ReleaseRes
 		return nil, tx.Error
 	}
 	defer tx.Rollback()
+
+	lockKey := fmt.Sprintf("%s:%s:%s", params.ClientScope, params.Operation, params.IdempotencyKey)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockKey).Error; err != nil {
+		return nil, fmt.Errorf("acquire advisory lock: %w", err)
+	}
 
 	// Check idempotency first inside transaction
 	var existingRecord IdempotencyRecord
