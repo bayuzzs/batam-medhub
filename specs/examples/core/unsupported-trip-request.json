@@ -1,0 +1,38 @@
+{
+  "trip_request": {
+    "id": "trip-000003",
+    "status": "UNSUPPORTED_SERVICE",
+    "intent": {
+      "schema_version": "1.0",
+      "resolution": "UNSUPPORTED_SERVICE",
+      "intent_category": null,
+      "requested_service_text": "knee replacement surgery",
+      "service_code": null,
+      "candidate_service_codes": [],
+      "origin_port": "HARBOURFRONT_SG",
+      "date_window": {
+        "from": "2026-08-22",
+        "to": "2026-08-24"
+      },
+      "patient_count": 1,
+      "companion_count": 1,
+      "stay_type": "OVERNIGHT",
+      "budget": null,
+      "preferences": {
+        "language": "en",
+        "hotel_tier": null,
+        "accessibility": []
+      },
+      "missing_fields": [],
+      "clarification_question": null,
+      "out_of_scope_reason": null,
+      "unsupported_reason": "The requested service is not available in the active Batam MedHub catalog."
+    },
+    "planning_revision": 0,
+    "reference_currency": "SGD",
+    "journey_id": null,
+    "created_at": "2026-08-15T08:10:00Z",
+    "updated_at": "2026-08-15T08:10:01Z"
+  },
+  "plan_options": []
+}

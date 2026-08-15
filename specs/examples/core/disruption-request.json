@@ -1,0 +1,32 @@
+{
+  "external_event_id": "hospital-event-000001",
+  "journey_id": "journey-000001",
+  "event_type": "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+  "occurred_at": "2026-08-22T04:30:00Z",
+  "target": {
+    "itinerary_item_id": "item-v1-hospital",
+    "external_reservation_id": "hospital-res-000001"
+  },
+  "actor": {
+    "actor_id": "intl-desk-07",
+    "name": "Synthetic International Patient Desk",
+    "role": "HOSPITAL_COORDINATOR"
+  },
+  "details": {
+    "reason": "The hospital requested an additional provider-authored observation session after the check-up.",
+    "replacement_time_window": {
+      "starts_at": "2026-08-22T05:00:00Z",
+      "ends_at": "2026-08-22T06:30:00Z",
+      "start_time_zone": "Asia/Jakarta",
+      "end_time_zone": "Asia/Jakarta"
+    },
+    "additional_service_code": "FOLLOWUP_OBSERVATION",
+    "additional_duration_minutes": 90,
+    "priority": "ROUTINE",
+    "travel_clearance_status": "CLEARED",
+    "instruction_reference": "hospital-instruction://followup-observation/FO-20260822-0001",
+    "operational_requirements": [
+      "Keep the patient at the hospital until the provider-authored observation is complete."
+    ]
+  }
+}

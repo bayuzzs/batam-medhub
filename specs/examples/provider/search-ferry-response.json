@@ -1,0 +1,34 @@
+{
+  "provider_id": "ferry-demo-01",
+  "provider_type": "FERRY",
+  "offers": [
+    {
+      "offer_id": "ferry-offer-hf-btm-20260822-0730",
+      "provider_id": "ferry-demo-01",
+      "provider_type": "FERRY",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-21T23:30:00Z",
+        "ends_at": "2026-08-22T00:40:00Z",
+        "start_time_zone": "Asia/Singapore",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 24,
+      "unit_price": {
+        "amount_minor": 2500,
+        "currency": "SGD"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "FERRY",
+        "sailing_id": "ferry-sailing-hf-btm-20260822-0730",
+        "operator_name": "Synthetic Cross-Strait Ferry",
+        "origin_port_code": "HARBOURFRONT_SG",
+        "destination_port_code": "BATAM_CENTRE_ID",
+        "check_in_cutoff_at": "2026-08-21T22:30:00Z"
+      }
+    }
+  ]
+}

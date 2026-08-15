@@ -1,0 +1,14 @@
+{
+  "provider_type": "HOSPITAL",
+  "criteria": {
+    "service_code": "FOLLOWUP_OBSERVATION",
+    "patient_count": 1,
+    "appointment_window": {
+      "starts_at": "2026-08-22T05:00:00Z",
+      "ends_at": "2026-08-22T06:30:00Z",
+      "start_time_zone": "Asia/Jakarta",
+      "end_time_zone": "Asia/Jakarta"
+    },
+    "accessibility": []
+  }
+}

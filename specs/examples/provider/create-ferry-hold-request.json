@@ -1,0 +1,11 @@
+{
+  "provider_id": "ferry-demo-01",
+  "provider_type": "FERRY",
+  "offer_id": "ferry-offer-hf-btm-20260822-0730",
+  "units": 2,
+  "expected_unit_price": {
+    "amount_minor": 2500,
+    "currency": "SGD"
+  },
+  "client_reference": "journey-000001-ferry-outbound"
+}

@@ -1,0 +1,11 @@
+{
+  "provider_id": "hospital-demo-01",
+  "provider_type": "HOSPITAL",
+  "offer_id": "hospital-offer-mcu-basic-20260822-1000",
+  "units": 1,
+  "expected_unit_price": {
+    "amount_minor": 150000000,
+    "currency": "IDR"
+  },
+  "client_reference": "journey-000001-hospital"
+}

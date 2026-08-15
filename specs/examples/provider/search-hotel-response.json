@@ -1,0 +1,36 @@
+{
+  "provider_id": "hotel-demo-01",
+  "provider_type": "HOTEL",
+  "offers": [
+    {
+      "offer_id": "hotel-offer-batam-centre-20260822-1n",
+      "provider_id": "hotel-demo-01",
+      "provider_type": "HOTEL",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T07:00:00Z",
+        "ends_at": "2026-08-23T05:00:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 8,
+      "unit_price": {
+        "amount_minor": 85000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-22T03:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "HOTEL",
+        "room_inventory_id": "hotel-room-deluxe-20260822",
+        "property_name": "Synthetic Batam Centre Hotel",
+        "room_type": "DELUXE_TWIN",
+        "check_in_date": "2026-08-22",
+        "check_out_date": "2026-08-23",
+        "max_guests_per_room": 2,
+        "accessibility": []
+      }
+    }
+  ]
+}

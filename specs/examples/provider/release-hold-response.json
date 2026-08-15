@@ -1,0 +1,9 @@
+{
+  "resource_type": "HOLD",
+  "resource_id": "hosp-hold-compensation-000001",
+  "external_reference": "HOSP-HOLD-COMPENSATION-000001",
+  "provider_id": "hospital-demo-01",
+  "provider_type": "HOSPITAL",
+  "status": "RELEASED",
+  "released_at": "2026-08-15T08:03:45Z"
+}

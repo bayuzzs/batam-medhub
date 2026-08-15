@@ -1,0 +1,1347 @@
+openapi: 3.1.0
+info:
+  title: Batam MedHub Provider Integration API
+  version: 0.1.0
+  summary: Contract used by the Batam MedHub backend to call mock providers.
+  description: |
+    A shared HTTP contract implemented independently by the hospital, ferry,
+    hotel, and internal transport provider services.
+
+    Each provider owns its live offers, inventory, holds, and reservations in
+    its own logical PostgreSQL database. Batam MedHub stores provider-issued
+    references and immutable snapshots; it never reads a provider database.
+
+    The common lifecycle is:
+
+    `AVAILABLE -> HELD -> CONFIRMED`
+
+    A `HELD` resource can become `RELEASED` or `EXPIRED`. A `CONFIRMED`
+    reservation can become `RELEASED` when Batam MedHub compensates or replaces
+    it. All mutation endpoints are idempotent.
+
+    This API does not contain disruption callbacks. Provider actors submit
+    disruptions directly to the Batam MedHub core API.
+servers:
+  - url: http://{provider_host}:{provider_port}
+    description: Provider service selected by the backend adapter.
+    variables:
+      provider_host:
+        default: localhost
+      provider_port:
+        default: "8081"
+security:
+  - IntegrationSecret: []
+tags:
+  - name: Health
+    description: Provider process and datastore health.
+  - name: Offers
+    description: Provider-owned availability search.
+  - name: Holds
+    description: Temporary capacity allocation and confirmation.
+  - name: Reservations
+    description: Confirmed provider bookings and compensation release.
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: getProviderHealth
+      summary: Check the provider service and its datastore.
+      security: []
+      responses:
+        "200":
+          description: The provider service and its datastore are ready.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: UP
+                provider_id: hospital-demo-01
+                provider_type: HOSPITAL
+                database_status: UP
+                checked_at: "2026-08-15T08:00:00Z"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/offers/search:
+    post:
+      tags: [Offers]
+      operationId: searchProviderOffers
+      summary: Search current provider-owned availability.
+      description: |
+        Returns only offers that are `AVAILABLE` at response time. The request
+        `provider_type` and criteria variant must match the receiving service.
+        Search does not reserve capacity and is not an idempotent mutation.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+            examples:
+              hospital:
+                summary: Hospital appointment search
+                externalValue: ./examples/provider/search-hospital-request.json
+              ferry:
+                summary: Outbound ferry sailing search
+                externalValue: ./examples/provider/search-ferry-request.json
+              ferry_return:
+                summary: Original and recovery return ferry search
+                externalValue: ./examples/provider/search-ferry-return-request.json
+              hotel:
+                summary: Hotel stay search
+                externalValue: ./examples/provider/search-hotel-request.json
+              transport:
+                summary: Outbound internal transport search
+                externalValue: ./examples/provider/search-transport-request.json
+              transport_return:
+                summary: Original and recovery return transport search
+                externalValue: ./examples/provider/search-transport-return-request.json
+              hospital_followup:
+                summary: Provider-only follow-up observation search
+                externalValue: ./examples/provider/search-hospital-followup-request.json
+      responses:
+        "200":
+          description: Current matching offers. An empty list is a valid result.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              examples:
+                hospital:
+                  summary: Hospital offers
+                  externalValue: ./examples/provider/search-hospital-response.json
+                ferry:
+                  summary: Outbound ferry offers
+                  externalValue: ./examples/provider/search-ferry-response.json
+                ferry_return:
+                  summary: Original and recovery return ferry offers
+                  externalValue: ./examples/provider/search-ferry-return-response.json
+                hotel:
+                  summary: Hotel offers
+                  externalValue: ./examples/provider/search-hotel-response.json
+                transport:
+                  summary: Outbound transport offers
+                  externalValue: ./examples/provider/search-transport-response.json
+                transport_return:
+                  summary: Original and recovery return transport offers
+                  externalValue: ./examples/provider/search-transport-return-response.json
+                hospital_followup:
+                  summary: Provider-only follow-up observation offer
+                  externalValue: ./examples/provider/search-hospital-followup-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/holds:
+    post:
+      tags: [Holds]
+      operationId: createProviderHold
+      summary: Atomically hold capacity for an available offer.
+      description: |
+        The provider revalidates offer expiry, price, and capacity in one
+        transaction. Reusing the same idempotency key with the same request
+        returns the original result; reusing it with a different request
+        returns `IDEMPOTENCY_CONFLICT`.
+
+        The body `provider_id` and `provider_type` must match the provider
+        identity configured for the authenticated receiving service. The
+        service rejects a mismatched assertion with `403`; callers cannot use
+        the body discriminator to bypass provider-specific validation such as
+        transport booking requirements.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHoldRequest"
+            examples:
+              hospital:
+                externalValue: ./examples/provider/create-hold-request.json
+              ferry:
+                summary: Hold two passenger seats on the outbound sailing
+                externalValue: ./examples/provider/create-ferry-hold-request.json
+              transport:
+                summary: Hold one vehicle assignment for two passengers
+                externalValue: ./examples/provider/create-transport-hold-request.json
+      responses:
+        "201":
+          description: Capacity was held and an expiry was assigned.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+              examples:
+                hospital:
+                  externalValue: ./examples/provider/create-hold-response.json
+                ferry:
+                  summary: Two seats held at the per-passenger unit price
+                  externalValue: ./examples/provider/create-ferry-hold-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Capacity, price, status, or idempotency conflict.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                capacity_conflict:
+                  externalValue: ./examples/provider/capacity-conflict-error.json
+                idempotency_conflict:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_CONFLICT
+                      message: The idempotency key was already used with a different request.
+                      retryable: false
+                      request_id: req-provider-0002
+                      details: []
+        "410":
+          $ref: "#/components/responses/Gone"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/holds/{hold_id}/confirm:
+    post:
+      tags: [Holds, Reservations]
+      operationId: confirmProviderHold
+      summary: Confirm a live hold and create a reservation.
+      description: |
+        Confirmation is rejected after the hold expires. A successful response
+        contains the provider-issued reservation reference used by the core
+        backend for later lookup or compensation.
+      parameters:
+        - $ref: "#/components/parameters/HoldId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: The hold was confirmed and the reservation was created.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+            Location:
+              description: Relative URL of the created reservation.
+              schema:
+                type: string
+              example: /v1/reservations/hospital-res-000001
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+              examples:
+                hospital:
+                  externalValue: ./examples/provider/confirm-hold-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "410":
+          description: The hold expired before confirmation.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                hold_expired:
+                  externalValue: ./examples/provider/hold-expired-error.json
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/holds/{hold_id}/release:
+    post:
+      tags: [Holds]
+      operationId: releaseProviderHold
+      summary: Release capacity held by an unconfirmed hold.
+      parameters:
+        - $ref: "#/components/parameters/HoldId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The hold was released.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseResult"
+              examples:
+                hold:
+                  externalValue: ./examples/provider/release-hold-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/reservations/{reservation_id}:
+    get:
+      tags: [Reservations]
+      operationId: getProviderReservation
+      summary: Retrieve the current provider reservation status.
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: The reservation was found.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+              examples:
+                hospital:
+                  externalValue: ./examples/provider/reservation-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/reservations/{reservation_id}/release:
+    post:
+      tags: [Reservations]
+      operationId: releaseProviderReservation
+      summary: Release a confirmed reservation during compensation or replacement.
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The reservation was released.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseResult"
+              examples:
+                reservation:
+                  externalValue: ./examples/provider/release-reservation-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+components:
+  securitySchemes:
+    IntegrationSecret:
+      type: apiKey
+      in: header
+      name: X-Integration-Key
+      description: Provider-specific secret known only to Batam MedHub and this provider.
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: true
+      description: Correlation ID generated by the calling backend and echoed by the provider.
+      schema:
+        $ref: "#/components/schemas/RequestId"
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Unique mutation key. It may be retried only with the same HTTP method,
+        path, and body. Keys are scoped to the receiving provider.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+      example: idem-journey-000001-hospital-hold
+    HoldId:
+      name: hold_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+      example: hosp-hold-000001
+    ReservationId:
+      name: reservation_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+      example: hospital-res-000001
+
+  headers:
+    RequestId:
+      description: Request correlation ID, echoed or generated by the provider.
+      schema:
+        $ref: "#/components/schemas/RequestId"
+    IdempotencyReplayed:
+      description: True when the response was replayed from a previous identical mutation.
+      schema:
+        type: boolean
+      example: false
+
+  responses:
+    BadRequest:
+      description: The request is syntactically invalid or fails validation.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: INVALID_REQUEST
+              message: The request failed validation.
+              retryable: false
+              request_id: req-provider-0001
+              details:
+                - field: criteria.service_code
+                  reason: is required
+    Unauthorized:
+      description: The provider integration secret is missing or invalid.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: AUTHENTICATION_FAILED
+              message: Provider integration authentication failed.
+              retryable: false
+              request_id: req-provider-0001
+              details: []
+    Forbidden:
+      description: The authenticated provider service does not match the asserted provider identity or type.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: PROVIDER_IDENTITY_MISMATCH
+              message: The asserted provider identity does not match this provider service.
+              retryable: false
+              request_id: req-provider-0001
+              details: []
+    NotFound:
+      description: The provider-owned resource does not exist.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: NOT_FOUND
+              message: The requested provider resource was not found.
+              retryable: false
+              request_id: req-provider-0001
+              details: []
+    Conflict:
+      description: Current capacity, price, status, or idempotency conflicts with the request.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+        Idempotency-Replayed:
+          $ref: "#/components/headers/IdempotencyReplayed"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: INVALID_STATE
+              message: The resource cannot perform this transition from its current status.
+              retryable: false
+              request_id: req-provider-0001
+              details: []
+    Gone:
+      description: The referenced offer or hold has expired.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: OFFER_EXPIRED
+              message: The offer expired before it could be held.
+              retryable: true
+              request_id: req-provider-0001
+              details: []
+    InternalError:
+      description: The provider failed unexpectedly.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: The provider could not complete the request.
+              retryable: true
+              request_id: req-provider-0001
+              details: []
+    ServiceUnavailable:
+      description: The provider or its datastore is temporarily unavailable.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+        Retry-After:
+          description: Suggested retry delay in seconds when known.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: The provider is temporarily unavailable.
+              retryable: true
+              request_id: req-provider-0001
+              details: []
+
+  schemas:
+    ProviderType:
+      type: string
+      enum: [HOSPITAL, FERRY, HOTEL, TRANSPORT]
+
+    ProviderId:
+      type: string
+      minLength: 3
+      maxLength: 64
+      pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+      description: Stable provider-owned integration identifier.
+      example: hospital-demo-01
+
+    ResourceId:
+      type: string
+      minLength: 3
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+      description: Stable opaque identifier issued by the provider.
+      example: hospital-offer-mcu-basic-20260822-1000
+
+    ExternalReference:
+      type: string
+      minLength: 3
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$"
+      description: Provider-facing display or reconciliation reference.
+      example: HOSP-RES-000001
+
+    ClientReference:
+      type: string
+      minLength: 3
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+      description: Stable Batam MedHub reference used for reconciliation.
+      example: journey-demo-000001-hospital
+
+    RequestId:
+      type: string
+      minLength: 3
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+      example: req-provider-0001
+
+    IanaTimezone:
+      type: string
+      minLength: 3
+      maxLength: 64
+      pattern: "^[A-Za-z_]+(?:/[A-Za-z0-9._+-]+)+$"
+      description: IANA TZDB name. Fixed UTC offsets are not accepted.
+      examples: [Asia/Jakarta, Asia/Singapore]
+
+    UtcInstant:
+      type: string
+      format: date-time
+      pattern: "Z$"
+      description: RFC 3339 timestamp normalized to UTC and ending in `Z`.
+      example: "2026-08-22T03:30:00Z"
+
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency]
+      properties:
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Amount in integer minor units using the ISO 4217 currency exponent;
+            never a floating-point value. For example, IDR 1,500,000 is
+            represented as 150000000 because IDR has exponent 2.
+          example: 150000000
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: ISO 4217 currency code.
+          example: IDR
+
+    TimeWindow:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at, start_time_zone, end_time_zone]
+      properties:
+        starts_at:
+          $ref: "#/components/schemas/UtcInstant"
+        ends_at:
+          $ref: "#/components/schemas/UtcInstant"
+        start_time_zone:
+          $ref: "#/components/schemas/IanaTimezone"
+        end_time_zone:
+          $ref: "#/components/schemas/IanaTimezone"
+      description: |
+        UTC instants plus the source IANA time zones needed for local display.
+        `starts_at` must precede `ends_at`.
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, provider_id, provider_type, database_status, checked_at]
+      properties:
+        status:
+          type: string
+          enum: [UP]
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        database_status:
+          type: string
+          enum: [UP]
+        checked_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required: [provider_type, criteria]
+      properties:
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        criteria:
+          oneOf:
+            - $ref: "#/components/schemas/HospitalSearchCriteria"
+            - $ref: "#/components/schemas/FerrySearchCriteria"
+            - $ref: "#/components/schemas/HotelSearchCriteria"
+            - $ref: "#/components/schemas/TransportSearchCriteria"
+      description: The criteria variant must match `provider_type`.
+      allOf:
+        - if:
+            properties:
+              provider_type:
+                const: HOSPITAL
+          then:
+            properties:
+              criteria:
+                $ref: "#/components/schemas/HospitalSearchCriteria"
+        - if:
+            properties:
+              provider_type:
+                const: FERRY
+          then:
+            properties:
+              criteria:
+                $ref: "#/components/schemas/FerrySearchCriteria"
+        - if:
+            properties:
+              provider_type:
+                const: HOTEL
+          then:
+            properties:
+              criteria:
+                $ref: "#/components/schemas/HotelSearchCriteria"
+        - if:
+            properties:
+              provider_type:
+                const: TRANSPORT
+          then:
+            properties:
+              criteria:
+                $ref: "#/components/schemas/TransportSearchCriteria"
+
+    HospitalSearchCriteria:
+      type: object
+      additionalProperties: false
+      required: [service_code, patient_count, appointment_window]
+      properties:
+        service_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Z][A-Z0-9_]*$"
+          description: |
+            Provider capability requested by the backend. It can be an active
+            patient-facing catalog code or a provider-authored recovery code.
+          example: MCU_BASIC
+        patient_count:
+          type: integer
+          minimum: 1
+          maximum: 20
+        appointment_window:
+          $ref: "#/components/schemas/TimeWindow"
+        accessibility:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          default: []
+
+    FerrySearchCriteria:
+      type: object
+      additionalProperties: false
+      required: [origin_port_code, destination_port_code, passenger_count, departure_window]
+      properties:
+        origin_port_code:
+          $ref: "#/components/schemas/LocationCode"
+        destination_port_code:
+          $ref: "#/components/schemas/LocationCode"
+        passenger_count:
+          type: integer
+          minimum: 1
+          maximum: 20
+        departure_window:
+          $ref: "#/components/schemas/TimeWindow"
+
+    HotelSearchCriteria:
+      type: object
+      additionalProperties: false
+      required: [check_in_date, check_out_date, local_timezone, room_count, guest_count]
+      properties:
+        check_in_date:
+          type: string
+          format: date
+        check_out_date:
+          type: string
+          format: date
+        local_timezone:
+          $ref: "#/components/schemas/IanaTimezone"
+        room_count:
+          type: integer
+          minimum: 1
+          maximum: 10
+        guest_count:
+          type: integer
+          minimum: 1
+          maximum: 20
+        accessibility:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          default: []
+
+    TransportSearchCriteria:
+      type: object
+      additionalProperties: false
+      required:
+        - pickup_location_code
+        - dropoff_location_code
+        - passenger_count
+        - pickup_window
+      properties:
+        pickup_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        dropoff_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        passenger_count:
+          type: integer
+          minimum: 1
+          maximum: 20
+        pickup_window:
+          $ref: "#/components/schemas/TimeWindow"
+        accessibility:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          default: []
+
+    LocationCode:
+      type: string
+      minLength: 2
+      maxLength: 64
+      pattern: "^[A-Z][A-Z0-9_]*$"
+      example: BATAM_CENTRE_ID
+
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required: [provider_id, provider_type, offers]
+      properties:
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        offers:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Offer"
+
+    Offer:
+      type: object
+      additionalProperties: false
+      required:
+        - offer_id
+        - provider_id
+        - provider_type
+        - status
+        - service_window
+        - available_units
+        - unit_price
+        - valid_until
+        - synthetic
+        - source
+        - details
+      properties:
+        offer_id:
+          $ref: "#/components/schemas/ResourceId"
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        status:
+          type: string
+          const: AVAILABLE
+        service_window:
+          $ref: "#/components/schemas/TimeWindow"
+        available_units:
+          type: integer
+          minimum: 1
+          description: Available appointments, seats, rooms, or vehicle assignments.
+        unit_price:
+          $ref: "#/components/schemas/Money"
+        valid_until:
+          $ref: "#/components/schemas/UtcInstant"
+        synthetic:
+          type: boolean
+          const: true
+        source:
+          type: string
+          const: MOCK
+        details:
+          oneOf:
+            - $ref: "#/components/schemas/HospitalOfferDetails"
+            - $ref: "#/components/schemas/FerryOfferDetails"
+            - $ref: "#/components/schemas/HotelOfferDetails"
+            - $ref: "#/components/schemas/TransportOfferDetails"
+          description: The detail variant must match `provider_type`.
+      allOf:
+        - if:
+            properties:
+              provider_type:
+                const: HOSPITAL
+          then:
+            properties:
+              details:
+                $ref: "#/components/schemas/HospitalOfferDetails"
+        - if:
+            properties:
+              provider_type:
+                const: FERRY
+          then:
+            properties:
+              details:
+                $ref: "#/components/schemas/FerryOfferDetails"
+        - if:
+            properties:
+              provider_type:
+                const: HOTEL
+          then:
+            properties:
+              details:
+                $ref: "#/components/schemas/HotelOfferDetails"
+        - if:
+            properties:
+              provider_type:
+                const: TRANSPORT
+          then:
+            properties:
+              details:
+                $ref: "#/components/schemas/TransportOfferDetails"
+
+    HospitalOfferDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_type
+        - service_code
+        - appointment_slot_id
+        - facility_name
+        - duration_minutes
+      properties:
+        provider_type:
+          type: string
+          const: HOSPITAL
+        service_code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]*$"
+        appointment_slot_id:
+          $ref: "#/components/schemas/ResourceId"
+        facility_name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        duration_minutes:
+          type: integer
+          minimum: 1
+        languages:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items:
+            type: string
+            pattern: "^[a-z]{2,3}(?:-[A-Z]{2})?$"
+        accessibility:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items:
+            type: string
+
+    FerryOfferDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_type
+        - sailing_id
+        - operator_name
+        - origin_port_code
+        - destination_port_code
+        - check_in_cutoff_at
+      properties:
+        provider_type:
+          type: string
+          const: FERRY
+        sailing_id:
+          $ref: "#/components/schemas/ResourceId"
+        operator_name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        origin_port_code:
+          $ref: "#/components/schemas/LocationCode"
+        destination_port_code:
+          $ref: "#/components/schemas/LocationCode"
+        check_in_cutoff_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    HotelOfferDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_type
+        - room_inventory_id
+        - property_name
+        - room_type
+        - check_in_date
+        - check_out_date
+        - max_guests_per_room
+      properties:
+        provider_type:
+          type: string
+          const: HOTEL
+        room_inventory_id:
+          $ref: "#/components/schemas/ResourceId"
+        property_name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        room_type:
+          type: string
+          minLength: 1
+          maxLength: 80
+        check_in_date:
+          type: string
+          format: date
+        check_out_date:
+          type: string
+          format: date
+        max_guests_per_room:
+          type: integer
+          minimum: 1
+        accessibility:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items:
+            type: string
+
+    TransportOfferDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - provider_type
+        - availability_id
+        - vehicle_type
+        - pickup_location_code
+        - dropoff_location_code
+        - passenger_capacity
+      properties:
+        provider_type:
+          type: string
+          const: TRANSPORT
+        availability_id:
+          $ref: "#/components/schemas/ResourceId"
+        vehicle_type:
+          type: string
+          minLength: 1
+          maxLength: 80
+        pickup_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        dropoff_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        passenger_capacity:
+          type: integer
+          minimum: 1
+        accessibility:
+          type: array
+          uniqueItems: true
+          maxItems: 20
+          items:
+            type: string
+
+    CreateHoldRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        `booking_requirements` is required when `provider_type` is `TRANSPORT`
+        and is rejected for other provider types. This event-specific invariant
+        is enforced after structural schema validation and after the asserted
+        provider identity is matched to the authenticated receiving service.
+      required: [provider_id, provider_type, offer_id, units, expected_unit_price, client_reference]
+      properties:
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        offer_id:
+          $ref: "#/components/schemas/ResourceId"
+        units:
+          type: integer
+          minimum: 1
+          maximum: 20
+          description: |
+            Capacity units to hold. For transport this is the number of vehicle
+            assignments, not the passenger count.
+        expected_unit_price:
+          $ref: "#/components/schemas/Money"
+        client_reference:
+          $ref: "#/components/schemas/ClientReference"
+        booking_requirements:
+          $ref: "#/components/schemas/TransportBookingRequirements"
+    TransportBookingRequirements:
+      type: object
+      additionalProperties: false
+      required:
+        - passenger_count
+        - pickup_location_code
+        - dropoff_location_code
+        - pickup_window
+        - accessibility
+      properties:
+        passenger_count:
+          type: integer
+          minimum: 1
+          maximum: 20
+        pickup_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        dropoff_location_code:
+          $ref: "#/components/schemas/LocationCode"
+        pickup_window:
+          $ref: "#/components/schemas/TimeWindow"
+        accessibility:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+
+    Hold:
+      type: object
+      additionalProperties: false
+      required:
+        - hold_id
+        - external_reference
+        - provider_id
+        - provider_type
+        - offer_id
+        - client_reference
+        - status
+        - units
+        - unit_price
+        - total_price
+        - service_window
+        - created_at
+        - expires_at
+      properties:
+        hold_id:
+          $ref: "#/components/schemas/ResourceId"
+        external_reference:
+          $ref: "#/components/schemas/ExternalReference"
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        offer_id:
+          $ref: "#/components/schemas/ResourceId"
+        client_reference:
+          $ref: "#/components/schemas/ClientReference"
+        status:
+          type: string
+          const: HELD
+        units:
+          type: integer
+          minimum: 1
+        unit_price:
+          $ref: "#/components/schemas/Money"
+        total_price:
+          $ref: "#/components/schemas/Money"
+        service_window:
+          $ref: "#/components/schemas/TimeWindow"
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+        expires_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    Reservation:
+      type: object
+      additionalProperties: false
+      required:
+        - reservation_id
+        - external_reference
+        - hold_id
+        - provider_id
+        - provider_type
+        - offer_id
+        - client_reference
+        - status
+        - units
+        - total_price
+        - service_window
+        - confirmed_at
+      properties:
+        reservation_id:
+          $ref: "#/components/schemas/ResourceId"
+        external_reference:
+          $ref: "#/components/schemas/ExternalReference"
+        hold_id:
+          $ref: "#/components/schemas/ResourceId"
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        offer_id:
+          $ref: "#/components/schemas/ResourceId"
+        client_reference:
+          $ref: "#/components/schemas/ClientReference"
+        status:
+          type: string
+          enum: [CONFIRMED, RELEASED]
+        units:
+          type: integer
+          minimum: 1
+        total_price:
+          $ref: "#/components/schemas/Money"
+        service_window:
+          $ref: "#/components/schemas/TimeWindow"
+        confirmed_at:
+          $ref: "#/components/schemas/UtcInstant"
+        released_at:
+          oneOf:
+            - $ref: "#/components/schemas/UtcInstant"
+            - type: "null"
+
+    ReleaseResult:
+      type: object
+      additionalProperties: false
+      required:
+        - resource_type
+        - resource_id
+        - external_reference
+        - provider_id
+        - provider_type
+        - status
+        - released_at
+      properties:
+        resource_type:
+          type: string
+          enum: [HOLD, RESERVATION]
+        resource_id:
+          $ref: "#/components/schemas/ResourceId"
+        external_reference:
+          $ref: "#/components/schemas/ExternalReference"
+        provider_id:
+          $ref: "#/components/schemas/ProviderId"
+        provider_type:
+          $ref: "#/components/schemas/ProviderType"
+        status:
+          type: string
+          const: RELEASED
+        released_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, request_id, details]
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - AUTHENTICATION_FAILED
+            - PROVIDER_IDENTITY_MISMATCH
+            - NOT_FOUND
+            - CAPACITY_CONFLICT
+            - OFFER_CHANGED
+            - OFFER_EXPIRED
+            - HOLD_EXPIRED
+            - INVALID_STATE
+            - IDEMPOTENCY_CONFLICT
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
+        message:
+          type: string
+          minLength: 1
+          maxLength: 500
+        retryable:
+          type: boolean
+        request_id:
+          $ref: "#/components/schemas/RequestId"
+        details:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        field:
+          type: string
+          minLength: 1
+          maxLength: 160
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500

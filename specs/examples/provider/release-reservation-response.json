@@ -1,0 +1,9 @@
+{
+  "resource_type": "RESERVATION",
+  "resource_id": "transport-res-000002",
+  "external_reference": "TRANSPORT-RES-000002",
+  "provider_id": "transport-demo-01",
+  "provider_type": "TRANSPORT",
+  "status": "RELEASED",
+  "released_at": "2026-08-22T04:36:00Z"
+}

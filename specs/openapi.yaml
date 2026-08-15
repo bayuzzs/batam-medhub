@@ -1,0 +1,1776 @@
+openapi: 3.1.0
+info:
+  title: Batam MedHub Core API
+  version: 0.1.0
+  summary: Patient journey orchestration and provider-authored disruption contract.
+  description: |
+    The Batam MedHub core API turns a supported planned-care request into a
+    feasible, confirmable, and recoverable cross-provider journey.
+
+    Cloudflare Workers AI is used only to extract structured intent. The core
+    validates model output, catalog membership, provider availability, journey
+    constraints, booking transitions, and disruption recovery deterministically.
+
+    All data in the hackathon environment is synthetic. Prices use integer
+    minor units. Instants use UTC while schedule objects retain IANA time zones.
+servers:
+  - url: http://{api_host}:{api_port}
+    description: Local development
+    variables:
+      api_host:
+        default: localhost
+      api_port:
+        default: "8080"
+tags:
+  - name: Health
+    description: Process and datastore health.
+  - name: Catalog
+    description: Supported medical-service catalog.
+  - name: Trip Requests
+    description: Intent extraction, clarification, planning, and confirmation.
+  - name: Journeys
+    description: Confirmed journeys and immutable itinerary versions.
+  - name: Disruptions
+    description: Provider events, impact analysis, and recovery approval.
+  - name: Demo
+    description: Explicitly protected synthetic-data reset operations.
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: getLiveness
+      summary: Check process liveness.
+      security: []
+      responses:
+        "200":
+          description: The API process is alive.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: UP
+                database_status: NOT_CHECKED
+                checked_at: "2026-08-15T08:00:00Z"
+
+  /readyz:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Check API and core datastore readiness.
+      security: []
+      responses:
+        "200":
+          description: The API and core datastore are ready.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: UP
+                database_status: UP
+                checked_at: "2026-08-15T08:00:00Z"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/medical-services:
+    get:
+      tags: [Catalog]
+      operationId: listMedicalServices
+      summary: List active medical services that Batam MedHub can orchestrate.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Active provider-authored medical services.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MedicalServiceListResponse"
+              examples:
+                default_catalog:
+                  externalValue: ./examples/core/medical-services.json
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/trip-requests:
+    post:
+      tags: [Trip Requests]
+      operationId: createTripRequest
+      summary: Create a trip request and extract structured intent.
+      description: |
+        The backend calls Workers AI, validates the structured result, and then
+        applies catalog and safety rules. The backend, not the model, decides
+        the final intent resolution and workflow status.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTripRequest"
+            example:
+              prompt: I need a same-day basic medical check-up in Batam on 22 August, leaving from HarbourFront with my spouse, with a budget of SGD 400.
+              locale: en
+      responses:
+        "201":
+          description: Trip request created and intent resolution persisted.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+            Location:
+              description: Relative URL of the trip request.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TripRequestDetail"
+              examples:
+                matched:
+                  externalValue: ./examples/core/matched-trip-request.json
+                needs_clarification:
+                  externalValue: ./examples/core/needs-clarification-trip-request.json
+                unsupported_service:
+                  externalValue: ./examples/core/unsupported-trip-request.json
+                out_of_scope:
+                  externalValue: ./examples/core/out-of-scope-trip-request.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/trip-requests/{trip_request_id}:
+    get:
+      tags: [Trip Requests]
+      operationId: getTripRequest
+      summary: Retrieve a trip request and its latest plan options.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/TripRequestId"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Trip request owned by the authenticated patient.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TripRequestDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/trip-requests/{trip_request_id}/intent:
+    patch:
+      tags: [Trip Requests]
+      operationId: amendTripRequestIntent
+      summary: Answer a clarification or correct extracted intent.
+      description: At least one of `answer` or `corrections` must be supplied.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/TripRequestId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AmendIntentRequest"
+      responses:
+        "200":
+          description: Intent amended, revalidated, and persisted.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TripRequestDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/trip-requests/{trip_request_id}/plans:
+    post:
+      tags: [Trip Requests]
+      operationId: generateTripPlans
+      summary: Generate at most two feasible cross-provider plans.
+      description: |
+        Planning is deterministic after intent validation. Provider searches
+        may partially fail, but an option is returned only when every required
+        hard constraint passes.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/TripRequestId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Planning completed, possibly with no feasible options.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanningResult"
+              examples:
+                feasible:
+                  externalValue: ./examples/core/plan-result.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/plan-options/{plan_option_id}/confirm:
+    post:
+      tags: [Trip Requests, Journeys]
+      operationId: confirmPlanOption
+      summary: Explicitly approve and confirm one plan option.
+      description: |
+        The core revalidates offers, creates provider holds, confirms them, and
+        compensates newly created resources if any later operation fails.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/PlanOptionId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "201":
+          description: All required reservations confirmed and journey created.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+            Location:
+              description: Relative URL of the active journey itinerary.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JourneyDetail"
+              examples:
+                itinerary_v1:
+                  externalValue: ./examples/core/active-journey-v1.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/journeys/{journey_id}/itinerary:
+    get:
+      tags: [Journeys]
+      operationId: getJourneyItinerary
+      summary: Retrieve the active itinerary and immutable version history.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/JourneyId"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Journey and all itinerary versions owned by the patient.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JourneyDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/journeys/{journey_id}/itineraries/{version}:
+    get:
+      tags: [Journeys]
+      operationId: getJourneyItineraryVersion
+      summary: Retrieve one immutable itinerary version with all of its items.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/JourneyId"
+        - $ref: "#/components/parameters/ItineraryVersionNumber"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Requested itinerary version belonging to the patient's journey.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItineraryVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/provider/disruptions:
+    post:
+      tags: [Disruptions]
+      operationId: submitProviderDisruption
+      summary: Submit and assess a provider-authored operational event.
+      description: |
+        `X-Provider-Key` authenticates the provider organization. The backend
+        derives provider identity and type from that key. The actor object is a
+        provider-asserted audit snapshot and is not independent user auth.
+
+        The event type must be compatible with the authenticated provider type,
+        and the targeted itinerary item or reservation must belong to that
+        provider and journey. A mismatch returns `403`.
+
+        `(provider_id, external_event_id)` is a deduplication key. An identical
+        request-body fingerprint replays the existing outcome; reusing the key
+        with different event facts returns `409`.
+      security:
+        - ProviderSecret: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderEventRequest"
+            examples:
+              hospital_additional_care:
+                externalValue: ./examples/core/disruption-request.json
+      responses:
+        "202":
+          description: Event persisted or deduplicated and assessment recorded.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderEventReceipt"
+              examples:
+                disruption_created:
+                  externalValue: ./examples/core/disruption-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/disruptions/{disruption_id}:
+    get:
+      tags: [Disruptions]
+      operationId: getDisruption
+      summary: Retrieve disruption impact and available recovery options.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/DisruptionId"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Disruption belonging to the patient's journey.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisruptionDetail"
+              examples:
+                additional_care_recovery:
+                  externalValue: ./examples/core/disruption-detail.json
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/recovery-options/{recovery_option_id}/approve:
+    post:
+      tags: [Disruptions, Journeys]
+      operationId: approveRecoveryOption
+      summary: Approve a logistical recovery and activate a successor itinerary.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RecoveryOptionId"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalRequest"
+      responses:
+        "200":
+          description: Recovery applied and the new itinerary version activated.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JourneyDetail"
+              examples:
+                itinerary_v2:
+                  externalValue: ./examples/core/recovery-approved-v2.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/demo/reset:
+    post:
+      tags: [Demo]
+      operationId: resetDemoData
+      summary: Reset synthetic core orchestration state to the default scenario.
+      description: |
+        This operation resets only the core datastore and must be disabled
+        outside the hackathon demo environment. The repository-level demo
+        reset procedure separately invokes the provider reset/reseed command;
+        the core never connects to provider databases.
+      security:
+        - DemoSecret: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DemoResetRequest"
+      responses:
+        "200":
+          description: Synthetic core state reset and reference seed data restored.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Idempotency-Replayed:
+              $ref: "#/components/headers/IdempotencyReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoResetResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+components:
+  securitySchemes:
+    PatientBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Verified patient JWT. The `sub` claim owns trip requests and journeys.
+        The `preferred_currency` claim is an ISO 4217 display currency.
+    ProviderSecret:
+      type: apiKey
+      in: header
+      name: X-Provider-Key
+      description: Provider-specific secret used for manual event submission.
+    DemoSecret:
+      type: apiKey
+      in: header
+      name: X-Demo-Key
+      description: Secret available only when explicit demo mode is enabled.
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Optional caller correlation ID. The backend generates one when absent.
+      schema:
+        $ref: "#/components/schemas/RequestId"
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Reusable only for an identical authenticated operation and request body.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+      example: idem-trip-000001
+    TripRequestId:
+      name: trip_request_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+    PlanOptionId:
+      name: plan_option_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+    JourneyId:
+      name: journey_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+    ItineraryVersionNumber:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    DisruptionId:
+      name: disruption_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+    RecoveryOptionId:
+      name: recovery_option_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ResourceId"
+
+  headers:
+    RequestId:
+      description: Correlation ID for this response.
+      schema:
+        $ref: "#/components/schemas/RequestId"
+    IdempotencyReplayed:
+      description: True when a prior identical mutation result was replayed.
+      schema:
+        type: boolean
+      example: false
+
+  responses:
+    BadRequest:
+      description: The request is syntactically invalid or fails basic validation.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Required authentication is missing or invalid.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: The authenticated principal cannot perform this operation.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: The resource does not exist or is not visible to the caller.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Current state, availability, or idempotency conflicts with the request.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+        Idempotency-Replayed:
+          $ref: "#/components/headers/IdempotencyReplayed"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnprocessableEntity:
+      description: The request is well-formed but violates domain rules.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    InternalError:
+      description: The backend failed unexpectedly.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ServiceUnavailable:
+      description: A required datastore, provider, or model dependency is unavailable.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+        Retry-After:
+          description: Suggested retry delay in seconds when known.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 3
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+      example: trip-000001
+
+    RequestId:
+      type: string
+      minLength: 8
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+      example: req-core-000001
+
+    UtcInstant:
+      type: string
+      format: date-time
+      description: RFC 3339 instant normalized to UTC and ending in `Z`.
+      example: "2026-08-22T03:00:00Z"
+
+    IanaTimezone:
+      type: string
+      minLength: 3
+      maxLength: 64
+      description: IANA time-zone identifier.
+      example: Asia/Jakarta
+
+    CurrencyCode:
+      type: string
+      pattern: "^[A-Z]{3}$"
+      example: SGD
+
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency]
+      properties:
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Integer minor units using the ISO 4217 exponent for the currency.
+          example: 12500
+        currency:
+          $ref: "#/components/schemas/CurrencyCode"
+
+    ConvertedMoney:
+      type: object
+      additionalProperties: false
+      required: [source, display, fx_rate, fx_source, fx_effective_at, estimated]
+      properties:
+        source:
+          $ref: "#/components/schemas/Money"
+        display:
+          $ref: "#/components/schemas/Money"
+        fx_rate:
+          type: string
+          pattern: '^[0-9]+(?:\.[0-9]+)?$'
+          description: Decimal string, never a binary floating-point value.
+          example: "11850.000000"
+        fx_source:
+          type: string
+          example: DEMO_STATIC_2026_08
+        fx_effective_at:
+          $ref: "#/components/schemas/UtcInstant"
+        estimated:
+          type: boolean
+          const: true
+
+    PriceSummary:
+      type: object
+      additionalProperties: false
+      required: [source_totals, display_total, estimated]
+      properties:
+        source_totals:
+          type: array
+          minItems: 1
+          description: One subtotal for each original provider currency.
+          items:
+            $ref: "#/components/schemas/Money"
+        display_total:
+          $ref: "#/components/schemas/Money"
+        estimated:
+          type: boolean
+          const: true
+
+    MoneyDelta:
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency, estimated]
+      properties:
+        amount_minor:
+          type: integer
+          format: int64
+          description: Signed change in the patient's reference currency.
+        currency:
+          $ref: "#/components/schemas/CurrencyCode"
+        estimated:
+          type: boolean
+          const: true
+
+    DateWindow:
+      type: object
+      additionalProperties: false
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+
+    TimeWindow:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at, start_time_zone, end_time_zone]
+      properties:
+        starts_at:
+          $ref: "#/components/schemas/UtcInstant"
+        ends_at:
+          $ref: "#/components/schemas/UtcInstant"
+        start_time_zone:
+          $ref: "#/components/schemas/IanaTimezone"
+        end_time_zone:
+          $ref: "#/components/schemas/IanaTimezone"
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, database_status, checked_at]
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+        database_status:
+          type: string
+          enum: [UP, DOWN, NOT_CHECKED]
+        checked_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    MedicalService:
+      type: object
+      additionalProperties: false
+      required: [code, name, category, active, synthetic, source]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+          example: MCU_BASIC
+        name:
+          type: string
+          example: Basic Medical Check-up
+        category:
+          type: string
+          example: PREVENTIVE_CHECKUP
+        description:
+          type: [string, "null"]
+        active:
+          type: boolean
+          const: true
+        synthetic:
+          type: boolean
+          const: true
+        source:
+          type: string
+          const: MOCK
+
+    MedicalServiceListResponse:
+      type: object
+      additionalProperties: false
+      required: [services]
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/MedicalService"
+
+    CreateTripRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt, locale]
+      properties:
+        prompt:
+          type: string
+          minLength: 3
+          maxLength: 2000
+        locale:
+          type: string
+          enum: [en, id]
+          description: Input language hint. Product responses remain English in this slice.
+
+    IntentResolution:
+      type: string
+      enum: [MATCHED, NEEDS_CLARIFICATION, UNSUPPORTED_SERVICE, OUT_OF_SCOPE]
+
+    StayType:
+      type: string
+      enum: [SAME_DAY, OVERNIGHT, FLEXIBLE]
+
+    IntentPreferences:
+      type: object
+      additionalProperties: false
+      required: [language, hotel_tier, accessibility]
+      properties:
+        language:
+          type: [string, "null"]
+        hotel_tier:
+          type: [string, "null"]
+          enum: [null, STANDARD, PREMIUM]
+        accessibility:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            maxLength: 64
+
+    StructuredIntent:
+      type: object
+      additionalProperties: false
+      description: |
+        Structurally strict output from the language boundary. After schema
+        validation, the backend applies resolution-specific invariants:
+        `MATCHED` requires all planning fields and an empty `missing_fields`;
+        `NEEDS_CLARIFICATION` requires missing fields and one question;
+        `UNSUPPORTED_SERVICE` requires only `unsupported_reason`; and
+        `OUT_OF_SCOPE` requires only a safe `out_of_scope_reason`. Nullable
+        values must never be filled with facts not stated by the patient.
+      required:
+        - schema_version
+        - resolution
+        - intent_category
+        - requested_service_text
+        - service_code
+        - candidate_service_codes
+        - origin_port
+        - date_window
+        - patient_count
+        - companion_count
+        - stay_type
+        - budget
+        - preferences
+        - missing_fields
+        - clarification_question
+        - out_of_scope_reason
+        - unsupported_reason
+      properties:
+        schema_version:
+          type: string
+          const: "1.0"
+        resolution:
+          $ref: "#/components/schemas/IntentResolution"
+        intent_category:
+          type: [string, "null"]
+          maxLength: 64
+        requested_service_text:
+          type: string
+          maxLength: 300
+        service_code:
+          type: [string, "null"]
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        candidate_service_codes:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        origin_port:
+          type: [string, "null"]
+          maxLength: 64
+        date_window:
+          oneOf:
+            - $ref: "#/components/schemas/DateWindow"
+            - type: "null"
+        patient_count:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 10
+        companion_count:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 10
+        stay_type:
+          oneOf:
+            - $ref: "#/components/schemas/StayType"
+            - type: "null"
+        budget:
+          oneOf:
+            - $ref: "#/components/schemas/Money"
+            - type: "null"
+        preferences:
+          $ref: "#/components/schemas/IntentPreferences"
+        missing_fields:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+        clarification_question:
+          type: [string, "null"]
+          maxLength: 500
+        out_of_scope_reason:
+          type: [string, "null"]
+          maxLength: 500
+        unsupported_reason:
+          type: [string, "null"]
+          maxLength: 500
+    IntentCorrections:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        service_code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        origin_port:
+          type: string
+          maxLength: 64
+        date_window:
+          $ref: "#/components/schemas/DateWindow"
+        patient_count:
+          type: integer
+          minimum: 1
+          maximum: 10
+        companion_count:
+          type: integer
+          minimum: 0
+          maximum: 10
+        stay_type:
+          $ref: "#/components/schemas/StayType"
+        budget:
+          $ref: "#/components/schemas/Money"
+        preferences:
+          $ref: "#/components/schemas/IntentPreferences"
+
+    AmendIntentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        answer:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        corrections:
+          $ref: "#/components/schemas/IntentCorrections"
+      anyOf:
+        - required: [answer]
+        - required: [corrections]
+
+    TripRequestStatus:
+      type: string
+      enum:
+        - DRAFT
+        - PARSING_INTENT
+        - NEEDS_INPUT
+        - UNSUPPORTED_SERVICE
+        - OUT_OF_SCOPE
+        - PLANNING
+        - NO_MATCH
+        - PLAN_READY
+        - CONFIRMING
+        - ACTIVE
+        - CONFIRMATION_FAILED
+        - MANUAL_REVIEW
+
+    TripRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - status
+        - intent
+        - planning_revision
+        - reference_currency
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        status:
+          $ref: "#/components/schemas/TripRequestStatus"
+        intent:
+          $ref: "#/components/schemas/StructuredIntent"
+        planning_revision:
+          type: integer
+          minimum: 0
+        reference_currency:
+          $ref: "#/components/schemas/CurrencyCode"
+        journey_id:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceId"
+            - type: "null"
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+        updated_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    TripRequestDetail:
+      type: object
+      additionalProperties: false
+      required: [trip_request, plan_options]
+      properties:
+        trip_request:
+          $ref: "#/components/schemas/TripRequest"
+        plan_options:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/PlanOption"
+
+    ItemType:
+      type: string
+      enum:
+        - FERRY_OUTBOUND
+        - ARRIVAL_BUFFER
+        - TRANSPORT_PICKUP
+        - HOSPITAL_APPOINTMENT
+        - ADDITIONAL_CARE
+        - HOTEL_STAY
+        - TRANSPORT_DROPOFF
+        - DEPARTURE_BUFFER
+        - FERRY_RETURN
+
+    PlanItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - item_type
+        - provider_id
+        - external_offer_id
+        - title
+        - time_window
+        - origin_code
+        - destination_code
+        - price
+        - offer_expires_at
+        - operational_notes
+        - synthetic
+        - source
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        item_type:
+          $ref: "#/components/schemas/ItemType"
+        provider_id:
+          type: [string, "null"]
+        external_offer_id:
+          type: [string, "null"]
+        title:
+          type: string
+          maxLength: 200
+        time_window:
+          $ref: "#/components/schemas/TimeWindow"
+        origin_code:
+          type: [string, "null"]
+        destination_code:
+          type: [string, "null"]
+        price:
+          oneOf:
+            - $ref: "#/components/schemas/ConvertedMoney"
+            - type: "null"
+        offer_expires_at:
+          oneOf:
+            - $ref: "#/components/schemas/UtcInstant"
+            - type: "null"
+        operational_notes:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        synthetic:
+          type: boolean
+          const: true
+        source:
+          type: string
+          const: MOCK
+
+    PlanOption:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - trip_request_id
+        - planning_revision
+        - rank
+        - status
+        - expires_at
+        - explanation
+        - items
+        - total_price
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        trip_request_id:
+          $ref: "#/components/schemas/ResourceId"
+        planning_revision:
+          type: integer
+          minimum: 1
+        rank:
+          type: integer
+          minimum: 1
+          maximum: 2
+        status:
+          type: string
+          enum: [PROPOSED, SELECTED, EXPIRED, CONFIRMED]
+        expires_at:
+          $ref: "#/components/schemas/UtcInstant"
+        explanation:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+        items:
+          type: array
+          minItems: 3
+          items:
+            $ref: "#/components/schemas/PlanItem"
+        total_price:
+          $ref: "#/components/schemas/PriceSummary"
+
+    PlanningResult:
+      type: object
+      additionalProperties: false
+      required: [trip_request, options, no_match_reasons, provider_warnings]
+      properties:
+        trip_request:
+          $ref: "#/components/schemas/TripRequest"
+        options:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/PlanOption"
+        no_match_reasons:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        provider_warnings:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+          const: true
+
+    JourneyStatus:
+      type: string
+      enum: [ACTIVE, MANUAL_REVIEW]
+
+    Journey:
+      type: object
+      additionalProperties: false
+      required: [id, trip_request_id, status, active_itinerary_version, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        trip_request_id:
+          $ref: "#/components/schemas/ResourceId"
+        status:
+          $ref: "#/components/schemas/JourneyStatus"
+        active_itinerary_version:
+          type: integer
+          minimum: 1
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+        updated_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    ItineraryItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - item_type
+        - provider_id
+        - external_reservation_id
+        - title
+        - status
+        - time_window
+        - origin_code
+        - destination_code
+        - price
+        - operational_notes
+        - synthetic
+        - source
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        item_type:
+          $ref: "#/components/schemas/ItemType"
+        provider_id:
+          type: [string, "null"]
+        external_reservation_id:
+          type: [string, "null"]
+        title:
+          type: string
+        status:
+          type: string
+          enum: [CONFIRMED, BUFFER, SUPERSEDED]
+        time_window:
+          $ref: "#/components/schemas/TimeWindow"
+        origin_code:
+          type: [string, "null"]
+        destination_code:
+          type: [string, "null"]
+        price:
+          oneOf:
+            - $ref: "#/components/schemas/ConvertedMoney"
+            - type: "null"
+        operational_notes:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        synthetic:
+          type: boolean
+          const: true
+        source:
+          type: string
+          const: MOCK
+
+    ItineraryVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - journey_id
+        - version
+        - status
+        - based_on_disruption_id
+        - total_price
+        - items
+        - created_at
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        journey_id:
+          $ref: "#/components/schemas/ResourceId"
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [ACTIVE, SUPERSEDED, ABANDONED]
+        based_on_disruption_id:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceId"
+            - type: "null"
+        total_price:
+          $ref: "#/components/schemas/PriceSummary"
+        items:
+          type: array
+          minItems: 3
+          items:
+            $ref: "#/components/schemas/ItineraryItem"
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    ItineraryVersionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, version, status, based_on_disruption_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [ACTIVE, SUPERSEDED, ABANDONED]
+        based_on_disruption_id:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceId"
+            - type: "null"
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    JourneyDetail:
+      type: object
+      additionalProperties: false
+      required: [journey, active_itinerary, itinerary_versions]
+      properties:
+        journey:
+          $ref: "#/components/schemas/Journey"
+        active_itinerary:
+          $ref: "#/components/schemas/ItineraryVersion"
+        itinerary_versions:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ItineraryVersionSummary"
+
+    ActorSnapshot:
+      type: object
+      additionalProperties: false
+      required: [actor_id, name, role]
+      properties:
+        actor_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        role:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    ProviderEventType:
+      type: string
+      enum:
+        - FERRY_DELAYED
+        - FERRY_CANCELLED
+        - HOSPITAL_APPOINTMENT_CHANGED
+        - HOSPITAL_ADDITIONAL_CARE_REQUESTED
+        - HOSPITAL_CLINICAL_HOLD
+        - HOTEL_ROOM_UNAVAILABLE
+        - HOTEL_RESERVATION_PROBLEM
+        - TRANSPORT_DELAYED
+        - TRANSPORT_UNAVAILABLE
+
+    ProviderEventTarget:
+      type: object
+      additionalProperties: false
+      properties:
+        itinerary_item_id:
+          $ref: "#/components/schemas/ResourceId"
+        external_reservation_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+      anyOf:
+        - required: [itinerary_item_id]
+        - required: [external_reservation_id]
+
+    ProviderEventDetails:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        delay_minutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        replacement_time_window:
+          $ref: "#/components/schemas/TimeWindow"
+        additional_service_code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        additional_duration_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        priority:
+          type: string
+          enum: [ROUTINE, URGENT]
+        travel_clearance_status:
+          type: string
+          enum: [CLEARED, NOT_CLEARED, PENDING_PROVIDER_REVIEW]
+        operational_requirements:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+        instruction_reference:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    ProviderEventRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        The backend applies event-specific validation after structural schema
+        validation. Delays require `delay_minutes`; appointment changes require
+        `replacement_time_window`; clinical holds require travel-clearance
+        status; and hospital additional care requires the replacement window,
+        service code, duration, priority, travel clearance, operational
+        requirements, and instruction reference. Missing required event facts
+        return `422` and never enter impact analysis.
+      required: [external_event_id, journey_id, event_type, occurred_at, target, actor, details]
+      properties:
+        external_event_id:
+          type: string
+          minLength: 3
+          maxLength: 128
+          description: |
+            Unique within the authenticated provider. Reuse is replay-safe only
+            when the canonical request-body fingerprint is identical.
+        journey_id:
+          $ref: "#/components/schemas/ResourceId"
+        event_type:
+          $ref: "#/components/schemas/ProviderEventType"
+        occurred_at:
+          $ref: "#/components/schemas/UtcInstant"
+        target:
+          $ref: "#/components/schemas/ProviderEventTarget"
+        actor:
+          $ref: "#/components/schemas/ActorSnapshot"
+        details:
+          $ref: "#/components/schemas/ProviderEventDetails"
+    ProviderEventReceipt:
+      type: object
+      additionalProperties: false
+      required: [provider_event_id, outcome, disruption_id, received_at]
+      properties:
+        provider_event_id:
+          $ref: "#/components/schemas/ResourceId"
+        outcome:
+          type: string
+          enum: [NO_ACTION, DISRUPTION_CREATED, DUPLICATE]
+          description: DUPLICATE means an identical provider event was replayed.
+        disruption_id:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceId"
+            - type: "null"
+        received_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    DisruptionStatus:
+      type: string
+      enum:
+        - DETECTED
+        - VALIDATING
+        - ANALYZING
+        - CLINICAL_HOLD
+        - MANUAL_REVIEW
+        - REPLAN_READY
+        - AWAITING_APPROVAL
+        - APPLYING
+        - RESOLVED
+        - RECOVERY_FAILED
+
+    ImpactSummary:
+      type: object
+      additionalProperties: false
+      required: [severity, affected_item_ids, explanation]
+      properties:
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CLINICAL_HOLD]
+        affected_item_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ResourceId"
+        explanation:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+
+    RecoveryChange:
+      type: object
+      additionalProperties: false
+      required: [change_type, old_itinerary_item_id, replacement_item, explanation]
+      properties:
+        change_type:
+          type: string
+          enum: [ADDED, CHANGED, REMOVED, UNCHANGED]
+        old_itinerary_item_id:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceId"
+            - type: "null"
+        replacement_item:
+          oneOf:
+            - $ref: "#/components/schemas/PlanItem"
+            - type: "null"
+        explanation:
+          type: string
+          maxLength: 500
+
+    RecoveryOption:
+      type: object
+      additionalProperties: false
+      required: [id, disruption_id, rank, status, expires_at, changes, time_delta_minutes, price_delta]
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        disruption_id:
+          $ref: "#/components/schemas/ResourceId"
+        rank:
+          type: integer
+          minimum: 1
+          maximum: 2
+        status:
+          type: string
+          enum: [PROPOSED, APPROVED, APPLYING, APPLIED, EXPIRED, FAILED]
+        expires_at:
+          $ref: "#/components/schemas/UtcInstant"
+        changes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/RecoveryChange"
+        time_delta_minutes:
+          type: integer
+          description: Signed change in final journey completion time versus the analyzed itinerary.
+        price_delta:
+          $ref: "#/components/schemas/MoneyDelta"
+
+    Disruption:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - journey_id
+        - provider_event_id
+        - analyzed_itinerary_version
+        - status
+        - impact
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        journey_id:
+          $ref: "#/components/schemas/ResourceId"
+        provider_event_id:
+          $ref: "#/components/schemas/ResourceId"
+        analyzed_itinerary_version:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/DisruptionStatus"
+        impact:
+          $ref: "#/components/schemas/ImpactSummary"
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+        updated_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    DisruptionDetail:
+      type: object
+      additionalProperties: false
+      required: [disruption, recovery_options]
+      properties:
+        disruption:
+          $ref: "#/components/schemas/Disruption"
+        recovery_options:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/RecoveryOption"
+
+    DemoResetRequest:
+      type: object
+      additionalProperties: false
+      required: [scenario, confirm]
+      properties:
+        scenario:
+          type: string
+          const: DEFAULT
+        confirm:
+          type: boolean
+          const: true
+
+    DemoResetResponse:
+      type: object
+      additionalProperties: false
+      required: [status, scenario, reset_at]
+      properties:
+        status:
+          type: string
+          const: RESET
+        scenario:
+          type: string
+          const: DEFAULT
+        reset_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+        reason:
+          type: string
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, request_id, details]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+          example: INVALID_STATE
+        message:
+          type: string
+          maxLength: 1000
+        retryable:
+          type: boolean
+        request_id:
+          $ref: "#/components/schemas/RequestId"
+        details:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"

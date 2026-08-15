@@ -1,0 +1,14 @@
+{
+  "provider_type": "FERRY",
+  "criteria": {
+    "origin_port_code": "BATAM_CENTRE_ID",
+    "destination_port_code": "HARBOURFRONT_SG",
+    "passenger_count": 2,
+    "departure_window": {
+      "starts_at": "2026-08-22T07:00:00Z",
+      "ends_at": "2026-08-22T09:30:00Z",
+      "start_time_zone": "Asia/Jakarta",
+      "end_time_zone": "Asia/Jakarta"
+    }
+  }
+}

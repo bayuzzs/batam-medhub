@@ -1,0 +1,14 @@
+{
+  "provider_type": "FERRY",
+  "criteria": {
+    "origin_port_code": "HARBOURFRONT_SG",
+    "destination_port_code": "BATAM_CENTRE_ID",
+    "passenger_count": 2,
+    "departure_window": {
+      "starts_at": "2026-08-21T21:30:00Z",
+      "ends_at": "2026-08-22T00:00:00Z",
+      "start_time_zone": "Asia/Singapore",
+      "end_time_zone": "Asia/Singapore"
+    }
+  }
+}

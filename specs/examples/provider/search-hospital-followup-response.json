@@ -1,0 +1,40 @@
+{
+  "provider_id": "hospital-demo-01",
+  "provider_type": "HOSPITAL",
+  "offers": [
+    {
+      "offer_id": "hospital-offer-followup-observation-20260822-1200",
+      "provider_id": "hospital-demo-01",
+      "provider_type": "HOSPITAL",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T05:00:00Z",
+        "ends_at": "2026-08-22T06:30:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 1,
+      "unit_price": {
+        "amount_minor": 50000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-22T04:50:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "HOSPITAL",
+        "service_code": "FOLLOWUP_OBSERVATION",
+        "appointment_slot_id": "hospital-slot-followup-observation-20260822-1200",
+        "facility_name": "Synthetic Batam MedHub Hospital",
+        "duration_minutes": 90,
+        "languages": [
+          "en",
+          "id"
+        ],
+        "accessibility": [
+          "WHEELCHAIR_ACCESS"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "provider_id": "transport-demo-01",
+  "provider_type": "TRANSPORT",
+  "offer_id": "transport-offer-btm-hospital-20260822-0825",
+  "units": 1,
+  "expected_unit_price": {
+    "amount_minor": 15000000,
+    "currency": "IDR"
+  },
+  "client_reference": "journey-000001-transport-outbound",
+  "booking_requirements": {
+    "passenger_count": 2,
+    "pickup_location_code": "BATAM_CENTRE_ID",
+    "dropoff_location_code": "HOSPITAL_DEMO_ID",
+    "pickup_window": {
+      "starts_at": "2026-08-22T01:25:00Z",
+      "ends_at": "2026-08-22T02:10:00Z",
+      "start_time_zone": "Asia/Jakarta",
+      "end_time_zone": "Asia/Jakarta"
+    },
+    "accessibility": []
+  }
+}

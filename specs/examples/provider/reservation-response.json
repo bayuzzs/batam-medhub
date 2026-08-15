@@ -1,0 +1,23 @@
+{
+  "reservation_id": "hospital-res-000001",
+  "external_reference": "HOSP-RES-000001",
+  "hold_id": "hosp-hold-000001",
+  "provider_id": "hospital-demo-01",
+  "provider_type": "HOSPITAL",
+  "offer_id": "hospital-offer-mcu-basic-20260822-1000",
+  "client_reference": "journey-000001-hospital",
+  "status": "CONFIRMED",
+  "units": 1,
+  "total_price": {
+    "amount_minor": 150000000,
+    "currency": "IDR"
+  },
+  "service_window": {
+    "starts_at": "2026-08-22T03:00:00Z",
+    "ends_at": "2026-08-22T05:00:00Z",
+    "start_time_zone": "Asia/Jakarta",
+    "end_time_zone": "Asia/Jakarta"
+  },
+  "confirmed_at": "2026-08-15T08:01:30Z",
+  "released_at": null
+}

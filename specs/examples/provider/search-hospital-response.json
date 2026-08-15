@@ -1,0 +1,93 @@
+{
+  "provider_id": "hospital-demo-01",
+  "provider_type": "HOSPITAL",
+  "offers": [
+    {
+      "offer_id": "hospital-offer-mcu-basic-20260822-0800",
+      "provider_id": "hospital-demo-01",
+      "provider_type": "HOSPITAL",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T01:00:00Z",
+        "ends_at": "2026-08-22T02:30:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 1,
+      "unit_price": {
+        "amount_minor": 120000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "HOSPITAL",
+        "service_code": "MCU_BASIC",
+        "appointment_slot_id": "hospital-slot-mcu-basic-20260822-0800",
+        "facility_name": "Synthetic Batam Hospital A",
+        "duration_minutes": 90,
+        "languages": ["en", "id"],
+        "accessibility": ["WHEELCHAIR_ACCESS"]
+      }
+    },
+    {
+      "offer_id": "hospital-offer-mcu-basic-20260822-1000",
+      "provider_id": "hospital-demo-01",
+      "provider_type": "HOSPITAL",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T03:00:00Z",
+        "ends_at": "2026-08-22T05:00:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 1,
+      "unit_price": {
+        "amount_minor": 150000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "HOSPITAL",
+        "service_code": "MCU_BASIC",
+        "appointment_slot_id": "hospital-slot-mcu-basic-20260822-1000",
+        "facility_name": "Synthetic Batam Hospital B",
+        "duration_minutes": 120,
+        "languages": ["en", "id"],
+        "accessibility": ["WHEELCHAIR_ACCESS"]
+      }
+    },
+    {
+      "offer_id": "hospital-offer-mcu-basic-20260822-1300",
+      "provider_id": "hospital-demo-01",
+      "provider_type": "HOSPITAL",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T06:00:00Z",
+        "ends_at": "2026-08-22T07:30:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 1,
+      "unit_price": {
+        "amount_minor": 200000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "HOSPITAL",
+        "service_code": "MCU_BASIC",
+        "appointment_slot_id": "hospital-slot-mcu-basic-20260822-1300",
+        "facility_name": "Synthetic Batam Hospital C",
+        "duration_minutes": 90,
+        "languages": ["en", "id"],
+        "accessibility": ["WHEELCHAIR_ACCESS"]
+      }
+    }
+  ]
+}

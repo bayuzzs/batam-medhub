@@ -1,0 +1,64 @@
+{
+  "provider_id": "transport-demo-01",
+  "provider_type": "TRANSPORT",
+  "offers": [
+    {
+      "offer_id": "transport-offer-hospital-btm-20260822-1230",
+      "provider_id": "transport-demo-01",
+      "provider_type": "TRANSPORT",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T05:30:00Z",
+        "ends_at": "2026-08-22T06:15:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 3,
+      "unit_price": {
+        "amount_minor": 15000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "TRANSPORT",
+        "availability_id": "transport-availability-mpv-20260822-1230",
+        "vehicle_type": "MPV",
+        "pickup_location_code": "HOSPITAL_DEMO_ID",
+        "dropoff_location_code": "BATAM_CENTRE_ID",
+        "passenger_capacity": 5,
+        "accessibility": []
+      }
+    },
+    {
+      "offer_id": "transport-offer-hospital-btm-20260822-1345",
+      "provider_id": "transport-demo-01",
+      "provider_type": "TRANSPORT",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T06:45:00Z",
+        "ends_at": "2026-08-22T07:30:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 2,
+      "unit_price": {
+        "amount_minor": 15000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-22T06:30:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "TRANSPORT",
+        "availability_id": "transport-availability-mpv-20260822-1345",
+        "vehicle_type": "MPV",
+        "pickup_location_code": "HOSPITAL_DEMO_ID",
+        "dropoff_location_code": "BATAM_CENTRE_ID",
+        "passenger_capacity": 5,
+        "accessibility": []
+      }
+    }
+  ]
+}

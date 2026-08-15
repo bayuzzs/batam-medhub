@@ -1,0 +1,40 @@
+{
+  "services": [
+    {
+      "code": "MCU_BASIC",
+      "name": "Basic Medical Check-up",
+      "category": "PREVENTIVE_CHECKUP",
+      "description": "Synthetic basic planned check-up package for the hackathon demo.",
+      "active": true,
+      "synthetic": true,
+      "source": "MOCK"
+    },
+    {
+      "code": "MCU_COMPREHENSIVE",
+      "name": "Comprehensive Medical Check-up",
+      "category": "PREVENTIVE_CHECKUP",
+      "description": "Synthetic comprehensive planned check-up package for the hackathon demo.",
+      "active": true,
+      "synthetic": true,
+      "source": "MOCK"
+    },
+    {
+      "code": "DENTAL_CHECKUP",
+      "name": "Dental Check-up",
+      "category": "DENTAL_SCREENING",
+      "description": "Synthetic planned dental screening package for the hackathon demo.",
+      "active": true,
+      "synthetic": true,
+      "source": "MOCK"
+    },
+    {
+      "code": "EYE_SCREENING",
+      "name": "Eye Screening",
+      "category": "VISION_SCREENING",
+      "description": "Synthetic planned vision screening package for the hackathon demo.",
+      "active": true,
+      "synthetic": true,
+      "source": "MOCK"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "hold_id": "ferry-hold-000001",
+  "external_reference": "FERRY-HOLD-000001",
+  "provider_id": "ferry-demo-01",
+  "provider_type": "FERRY",
+  "offer_id": "ferry-offer-hf-btm-20260822-0730",
+  "client_reference": "journey-000001-ferry-outbound",
+  "status": "HELD",
+  "units": 2,
+  "unit_price": {
+    "amount_minor": 2500,
+    "currency": "SGD"
+  },
+  "total_price": {
+    "amount_minor": 5000,
+    "currency": "SGD"
+  },
+  "service_window": {
+    "starts_at": "2026-08-21T23:30:00Z",
+    "ends_at": "2026-08-22T00:40:00Z",
+    "start_time_zone": "Asia/Singapore",
+    "end_time_zone": "Asia/Jakarta"
+  },
+  "created_at": "2026-08-15T08:01:10Z",
+  "expires_at": "2026-08-15T08:11:10Z"
+}

@@ -1,0 +1,35 @@
+{
+  "trip_request": {
+    "id": "trip-000004",
+    "status": "OUT_OF_SCOPE",
+    "intent": {
+      "schema_version": "1.0",
+      "resolution": "OUT_OF_SCOPE",
+      "intent_category": null,
+      "requested_service_text": "I have severe chest pain and need emergency help now",
+      "service_code": null,
+      "candidate_service_codes": [],
+      "origin_port": null,
+      "date_window": null,
+      "patient_count": null,
+      "companion_count": null,
+      "stay_type": null,
+      "budget": null,
+      "preferences": {
+        "language": "en",
+        "hotel_tier": null,
+        "accessibility": []
+      },
+      "missing_fields": [],
+      "clarification_question": null,
+      "out_of_scope_reason": "This may be an emergency. Batam MedHub cannot triage or plan emergency care. Contact local emergency services immediately or go to the nearest emergency department.",
+      "unsupported_reason": null
+    },
+    "planning_revision": 0,
+    "reference_currency": "SGD",
+    "journey_id": null,
+    "created_at": "2026-08-15T08:15:00Z",
+    "updated_at": "2026-08-15T08:15:01Z"
+  },
+  "plan_options": []
+}

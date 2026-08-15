@@ -1,0 +1,35 @@
+{
+  "provider_id": "transport-demo-01",
+  "provider_type": "TRANSPORT",
+  "offers": [
+    {
+      "offer_id": "transport-offer-btm-hospital-20260822-0825",
+      "provider_id": "transport-demo-01",
+      "provider_type": "TRANSPORT",
+      "status": "AVAILABLE",
+      "service_window": {
+        "starts_at": "2026-08-22T01:25:00Z",
+        "ends_at": "2026-08-22T02:10:00Z",
+        "start_time_zone": "Asia/Jakarta",
+        "end_time_zone": "Asia/Jakarta"
+      },
+      "available_units": 3,
+      "unit_price": {
+        "amount_minor": 15000000,
+        "currency": "IDR"
+      },
+      "valid_until": "2026-08-20T12:00:00Z",
+      "synthetic": true,
+      "source": "MOCK",
+      "details": {
+        "provider_type": "TRANSPORT",
+        "availability_id": "transport-availability-mpv-20260822-0825",
+        "vehicle_type": "MPV",
+        "pickup_location_code": "BATAM_CENTRE_ID",
+        "dropoff_location_code": "HOSPITAL_DEMO_ID",
+        "passenger_capacity": 5,
+        "accessibility": []
+      }
+    }
+  ]
+}

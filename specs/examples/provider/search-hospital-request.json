@@ -1,0 +1,14 @@
+{
+  "provider_type": "HOSPITAL",
+  "criteria": {
+    "service_code": "MCU_BASIC",
+    "patient_count": 1,
+    "appointment_window": {
+      "starts_at": "2026-08-22T01:00:00Z",
+      "ends_at": "2026-08-22T10:00:00Z",
+      "start_time_zone": "Asia/Jakarta",
+      "end_time_zone": "Asia/Jakarta"
+    },
+    "accessibility": []
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "disruption": {
+    "id": "disruption-000001",
+    "journey_id": "journey-000001",
+    "provider_event_id": "provider-event-000001",
+    "analyzed_itinerary_version": 1,
+    "status": "AWAITING_APPROVAL",
+    "impact": {
+      "severity": "HIGH",
+      "affected_item_ids": [
+        "item-v1-hospital",
+        "item-v1-transfer-return",
+        "item-v1-departure-buffer",
+        "item-v1-ferry-return"
+      ],
+      "explanation": [
+        "The provider-authored observation extends care beyond the original return transfer.",
+        "The original transfer and return sailing must be replaced while preserving a terminal check-in buffer."
+      ]
+    },
+    "created_at": "2026-08-22T04:31:00Z",
+    "updated_at": "2026-08-22T04:32:00Z"
+  },
+  "recovery_options": [
+    {
+      "id": "recovery-option-000001",
+      "disruption_id": "disruption-000001",
+      "rank": 1,
+      "status": "PROPOSED",
+      "expires_at": "2026-08-22T04:50:00Z",
+      "changes": [
+        {
+          "change_type": "UNCHANGED",
+          "old_itinerary_item_id": "item-v1-hospital",
+          "replacement_item": {
+            "id": "recovery-plan-item-hospital-unchanged",
+            "item_type": "HOSPITAL_APPOINTMENT",
+            "provider_id": "hospital-demo-01",
+            "external_offer_id": "hospital-offer-mcu-basic-20260822-1000",
+            "title": "Basic Medical Check-up",
+            "time_window": {
+              "starts_at": "2026-08-22T03:00:00Z",
+              "ends_at": "2026-08-22T05:00:00Z",
+              "start_time_zone": "Asia/Jakarta",
+              "end_time_zone": "Asia/Jakarta"
+            },
+            "origin_code": "HOSPITAL_DEMO_ID",
+            "destination_code": "HOSPITAL_DEMO_ID",
+            "price": {
+              "source": {
+                "amount_minor": 150000000,
+                "currency": "IDR"
+              },
+              "display": {
+                "amount_minor": 12658,
+                "currency": "SGD"
+              },
+              "fx_rate": "0.0000843882",
+              "fx_source": "DEMO_STATIC_2026_08",
+              "fx_effective_at": "2026-08-01T00:00:00Z",
+              "estimated": true
+            },
+            "offer_expires_at": "2026-08-20T12:00:00Z",
+            "operational_notes": [
+              "Follow only the preparation instructions supplied by the hospital."
+            ],
+            "synthetic": true,
+            "source": "MOCK"
+          },
+          "explanation": "Keep the confirmed appointment and its provider-authored preparation note unchanged."
+        },
+        {
+          "change_type": "ADDED",
+          "old_itinerary_item_id": null,
+          "replacement_item": {
+            "id": "recovery-plan-item-additional-care",
+            "item_type": "ADDITIONAL_CARE",
+            "provider_id": "hospital-demo-01",
+            "external_offer_id": "hospital-offer-followup-observation-20260822-1200",
+            "title": "Provider-authored observation session",
+            "time_window": {
+              "starts_at": "2026-08-22T05:00:00Z",
+              "ends_at": "2026-08-22T06:30:00Z",
+              "start_time_zone": "Asia/Jakarta",
+              "end_time_zone": "Asia/Jakarta"
+            },
+            "origin_code": "HOSPITAL_DEMO_ID",
+            "destination_code": "HOSPITAL_DEMO_ID",
+            "price": {
+              "source": {
+                "amount_minor": 50000000,
+                "currency": "IDR"
+              },
+              "display": {
+                "amount_minor": 4219,
+                "currency": "SGD"
+              },
+              "fx_rate": "0.0000843882",
+              "fx_source": "DEMO_STATIC_2026_08",
+              "fx_effective_at": "2026-08-01T00:00:00Z",
+              "estimated": true
+            },
+            "offer_expires_at": "2026-08-22T04:50:00Z",
+            "operational_notes": [
+              "Keep the patient at the hospital until the provider-authored observation is complete.",
+              "Hospital instruction reference: hospital-instruction://followup-observation/FO-20260822-0001"
+            ],
+            "synthetic": true,
+            "source": "MOCK"
+          },
+          "explanation": "Add the hospital-requested observation using a provider-owned offer."
+        },
+        {
+          "change_type": "CHANGED",
+          "old_itinerary_item_id": "item-v1-transfer-return",
+          "replacement_item": {
+            "id": "recovery-plan-item-transfer-return",
+            "item_type": "TRANSPORT_DROPOFF",
+            "provider_id": "transport-demo-01",
+            "external_offer_id": "transport-offer-hospital-btm-20260822-1345",
+            "title": "Later hospital-to-terminal transfer",
+            "time_window": {
+              "starts_at": "2026-08-22T06:45:00Z",
+              "ends_at": "2026-08-22T07:30:00Z",
+              "start_time_zone": "Asia/Jakarta",
+              "end_time_zone": "Asia/Jakarta"
+            },
+            "origin_code": "HOSPITAL_DEMO_ID",
+            "destination_code": "BATAM_CENTRE_ID",
+            "price": {
+              "source": {
+                "amount_minor": 15000000,
+                "currency": "IDR"
+              },
+              "display": {
+                "amount_minor": 1266,
+                "currency": "SGD"
+              },
+              "fx_rate": "0.0000843882",
+              "fx_source": "DEMO_STATIC_2026_08",
+              "fx_effective_at": "2026-08-01T00:00:00Z",
+              "estimated": true
+            },
+            "offer_expires_at": "2026-08-22T06:30:00Z",
+            "operational_notes": [],
+            "synthetic": true,
+            "source": "MOCK"
+          },
+          "explanation": "Move the terminal transfer after the observation session."
+        },
+        {
+          "change_type": "CHANGED",
+          "old_itinerary_item_id": "item-v1-departure-buffer",
+          "replacement_item": {
+            "id": "recovery-plan-item-departure-buffer",
+            "item_type": "DEPARTURE_BUFFER",
+            "provider_id": null,
+            "external_offer_id": null,
+            "title": "Later return ferry check-in buffer",
+            "time_window": {
+              "starts_at": "2026-08-22T07:30:00Z",
+              "ends_at": "2026-08-22T08:30:00Z",
+              "start_time_zone": "Asia/Jakarta",
+              "end_time_zone": "Asia/Jakarta"
+            },
+            "origin_code": "BATAM_CENTRE_ID",
+            "destination_code": "BATAM_CENTRE_ID",
+            "price": null,
+            "offer_expires_at": null,
+            "operational_notes": [
+              "Complete terminal check-in before the provider cutoff."
+            ],
+            "synthetic": true,
+            "source": "MOCK"
+          },
+          "explanation": "Recalculate the terminal buffer against the replacement sailing cutoff."
+        },
+        {
+          "change_type": "CHANGED",
+          "old_itinerary_item_id": "item-v1-ferry-return",
+          "replacement_item": {
+            "id": "recovery-plan-item-ferry-return",
+            "item_type": "FERRY_RETURN",
+            "provider_id": "ferry-demo-01",
+            "external_offer_id": "ferry-offer-btm-hf-20260822-1600",
+            "title": "Later Batam Centre to HarbourFront ferry",
+            "time_window": {
+              "starts_at": "2026-08-22T09:00:00Z",
+              "ends_at": "2026-08-22T10:10:00Z",
+              "start_time_zone": "Asia/Jakarta",
+              "end_time_zone": "Asia/Singapore"
+            },
+            "origin_code": "BATAM_CENTRE_ID",
+            "destination_code": "HARBOURFRONT_SG",
+            "price": {
+              "source": {
+                "amount_minor": 5000,
+                "currency": "SGD"
+              },
+              "display": {
+                "amount_minor": 5000,
+                "currency": "SGD"
+              },
+              "fx_rate": "1.000000",
+              "fx_source": "DEMO_STATIC_2026_08",
+              "fx_effective_at": "2026-08-01T00:00:00Z",
+              "estimated": true
+            },
+            "offer_expires_at": "2026-08-22T08:30:00Z",
+            "operational_notes": [
+              "Check in at least 30 minutes before departure."
+            ],
+            "synthetic": true,
+            "source": "MOCK"
+          },
+          "explanation": "Use the first feasible sailing after additional care and transfer."
+        }
+      ],
+      "time_delta_minutes": 90,
+      "price_delta": {
+        "amount_minor": 4219,
+        "currency": "SGD",
+        "estimated": true
+      }
+    }
+  ]
+}

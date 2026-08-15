@@ -1,0 +1,14 @@
+{
+  "error": {
+    "code": "CAPACITY_CONFLICT",
+    "message": "The requested units are no longer available.",
+    "retryable": true,
+    "request_id": "req-provider-0002",
+    "details": [
+      {
+        "field": "units",
+        "reason": "requested=2 available=1"
+      }
+    ]
+  }
+}

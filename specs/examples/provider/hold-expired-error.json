@@ -1,0 +1,14 @@
+{
+  "error": {
+    "code": "HOLD_EXPIRED",
+    "message": "The hold expired before confirmation.",
+    "retryable": true,
+    "request_id": "req-provider-0003",
+    "details": [
+      {
+        "field": "hold_id",
+        "reason": "expired_at=2026-08-15T08:11:00Z"
+      }
+    ]
+  }
+}
