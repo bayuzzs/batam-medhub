@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mobile/main.dart';
 
@@ -10,8 +11,10 @@ import 'package:mobile/main.dart';
 ///
 /// The router is now a Riverpod provider ([appRouterProvider]) and each test
 /// builds its own scope, so auth state starts fresh (unauthenticated at
-/// onboarding) and no cross-test reset is needed.
+/// onboarding) and no cross-test reset is needed. The fake token store is
+/// `shared_preferences`-backed, so it's mocked with empty initial values.
 Future<void> _pumpApp(WidgetTester tester) async {
+  SharedPreferences.setMockInitialValues({});
   await tester.pumpWidget(const ProviderScope(child: MyApp()));
   await tester.pumpAndSettle();
 }

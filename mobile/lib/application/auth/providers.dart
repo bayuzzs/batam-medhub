@@ -8,22 +8,24 @@ import 'package:mobile/data/repository/fake_auth_repository.dart';
 import 'package:mobile/data/service/auth_api.dart';
 import 'package:mobile/data/service/auth_interceptor.dart';
 import 'package:mobile/data/service/dio_auth_api.dart';
-import 'package:mobile/data/service/in_memory_token_store.dart';
 import 'package:mobile/data/service/secure_token_store.dart';
+import 'package:mobile/data/service/shared_prefs_token_store.dart';
 import 'package:mobile/data/service/token_store.dart';
 
 import 'auth_controller.dart';
 
-/// DI switch: `true` (default) uses the in-memory [FakeAuthRepository] and an
-/// in-memory token store — no backend or platform secure storage needed.
-/// Set to `false` (or override [authRepositoryProvider] / [tokenStoreProvider])
-/// to use the real Dio backend + `flutter_secure_storage`.
+/// DI switch: `true` (default) uses the fake [FakeAuthRepository] with a
+/// `shared_preferences`-backed token store, so demo sessions survive a full
+/// app restart without a backend or platform secure storage. Set to `false`
+/// (or override [authRepositoryProvider] / [tokenStoreProvider]) to use the
+/// real Dio backend + `flutter_secure_storage`.
 const bool kUseFakeBackend = true;
 
-/// Token persistence. Fake mode keeps it in memory so tests and demo runs
-/// never touch platform channels; real mode uses secure storage.
+/// Token persistence. Fake mode persists via `shared_preferences` so a full
+/// reload restores the demo session; real mode uses secure storage. Tests
+/// override this provider with [InMemoryTokenStore].
 final tokenStoreProvider = Provider<TokenStore>((ref) {
-  return kUseFakeBackend ? InMemoryTokenStore() : SecureTokenStore();
+  return kUseFakeBackend ? SharedPreferencesTokenStore() : SecureTokenStore();
 });
 
 /// [Dio] configured with the API base URL and the [AuthInterceptor].

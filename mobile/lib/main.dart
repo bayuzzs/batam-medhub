@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'application/auth/providers.dart';
 import 'ui/core/navigation/app_router.dart';
 import 'ui/core/theme/app_theme.dart';
 
-void main() {
-  runApp(const ProviderScope(child: MyApp()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final container = ProviderContainer();
+  // Restore (and validate) any persisted session before the first frame, so
+  // the app boots straight into the right screen instead of flashing the
+  // onboarding/auth screens while the session is being restored.
+  await container.read(authControllerProvider.notifier).restore();
+  runApp(UncontrolledProviderScope(container: container, child: MyApp()));
 }
 
 class MyApp extends ConsumerWidget {

@@ -72,16 +72,24 @@ class AuthController extends Notifier<AuthState> {
 
   Timer? _refreshTimer;
   Future<void>? _inFlightRefresh;
+  Future<void>? _restoreFuture;
 
   AuthRepository get _repository => ref.read(authRepositoryProvider);
 
   @override
   AuthState build() {
     ref.onDispose(() => _refreshTimer?.cancel());
-    // Fire-and-forget restore; the router waits on [AuthStatus.restoring].
-    _restore();
+    // Kick off the startup restore; the router waits on [AuthStatus.restoring]
+    // while it's in flight. [restore] returns the same future, so main() can
+    // await it before the first frame without triggering a second restore.
+    restore();
     return const AuthState();
   }
+
+  /// Restores the persisted session, validating the access token (rotating it
+  /// via the refresh token if it's already expired). Idempotent: returns the
+  /// in-flight restore future so awaiting it never starts a second restore.
+  Future<void> restore() => _restoreFuture ??= _restore();
 
   Future<void> _restore() async {
     try {

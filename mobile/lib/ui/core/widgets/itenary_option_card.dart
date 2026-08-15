@@ -62,8 +62,8 @@ class ItenaryOptionCard extends StatelessWidget {
   /// Called when "View Details Itinerary" is tapped.
   final VoidCallback? onViewDetails;
 
-  static const double _imageWidth = 160;
-  static const double _imageHeight = 120;
+  static const double _imageWidth = 100;
+  static const double _imageHeight = 50;
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +71,7 @@ class ItenaryOptionCard extends StatelessWidget {
     final muted = AppColors.text.withValues(alpha: 0.75);
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.background,
         borderRadius: BorderRadius.circular(24),
@@ -98,36 +98,36 @@ class ItenaryOptionCard extends StatelessWidget {
                   children: [
                     Text(
                       providerName,
-                      style: theme.textTheme.headlineMedium?.copyWith(
+                      style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       serviceName,
-                      style: theme.textTheme.titleLarge?.copyWith(color: muted),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 16,
-                      runSpacing: 8,
-                      children: [
-                        _InfoItem(icon: LucideIcons.mapPin, text: location),
-                        _InfoItem(
-                          icon: LucideIcons.clock,
-                          text: 'Appointment · $appointment',
-                        ),
-                      ],
+                      style: theme.textTheme.bodyMedium?.copyWith(color: muted),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 4),
           Wrap(
-            spacing: 12,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoItem(icon: LucideIcons.mapPin, text: location),
+              _InfoItem(
+                icon: LucideIcons.clock,
+                text: 'Appointment · $appointment',
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
             children: [
               _OptionChip(
                 icon: LucideIcons.award,
@@ -149,35 +149,12 @@ class ItenaryOptionCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
           _PriceSection(price: price),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: onViewDetails,
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.heading,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'View Details Itinerary',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(
-                    LucideIcons.chevronRight,
-                    size: 22,
-                    color: AppColors.heading,
-                  ),
-                ],
-              ),
-            ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: onViewDetails,
+            child: Text('View Itinerary Details'),
           ),
         ],
       ),
@@ -192,7 +169,7 @@ class _RecommendedBanner extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      height: 44,
+      height: 32,
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(24),
@@ -200,13 +177,13 @@ class _RecommendedBanner extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(LucideIcons.star, size: 26, color: AppColors.primary),
+          const Icon(LucideIcons.star, size: 20, color: AppColors.heading),
           const SizedBox(width: 8),
           Text(
             'Recommended',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: AppColors.primary,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: AppColors.heading,
             ),
           ),
         ],
@@ -274,14 +251,7 @@ class _InfoItem extends StatelessWidget {
         const SizedBox(width: 6),
         // Flexible so the text wraps instead of overflowing when the card is
         // rendered in a narrow context (e.g. inside a chat bubble).
-        Flexible(
-          child: Text(
-            text,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: AppColors.text.withValues(alpha: 0.8),
-            ),
-          ),
-        ),
+        Flexible(child: Text(text, style: theme.textTheme.bodySmall)),
       ],
     );
   }
@@ -304,16 +274,10 @@ class _OptionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Chip(
-      avatar: Icon(icon, size: 20, color: foregroundColor),
+      avatar: Icon(icon, color: foregroundColor),
       label: Text(label),
       backgroundColor: backgroundColor,
-      side: BorderSide.none,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      labelStyle: TextStyle(
-        fontSize: 15,
-        fontWeight: FontWeight.w600,
-        color: foregroundColor,
-      ),
+      labelStyle: TextStyle(color: foregroundColor),
     );
   }
 }
@@ -328,38 +292,30 @@ class _PriceSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 20, 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.primary, width: 1.5),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Estimated Total', style: theme.textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Text(
-                  'Includes Ferry · Transport · Medical · Hotel',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Includes Ferry · Transport · Medical · Hotel',
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text('Estimated Total', style: theme.textTheme.bodyMedium),
             ),
-          ),
-          Text(
-            '$price/person',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
+            Text(
+              '$price/person',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 }

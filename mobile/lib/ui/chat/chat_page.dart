@@ -134,25 +134,22 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                       const SizedBox(height: 12),
                       const ChatItem.assistant(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Here\'s a great itinerary for you:'),
-                            SizedBox(height: 12),
-                            ItenaryOptionCard(
-                              imageUrl: AppAssets.barelang,
-                              providerName: 'RS Awal Bros Batam',
-                              serviceName: 'Cardiac Screening Package',
-                              location: 'Batu Aji · 5 km',
-                              appointment: 'Tomorrow, 09:00',
-                              rating: 4.8,
-                              reviewCount: 212,
-                              duration: '3 days',
-                              price: 'IDR 4.500.000',
-                              recommended: true,
-                            ),
-                          ],
-                        ),
+                        message: 'Here\'s a great itinerary for you:',
+                      ),
+                      const SizedBox(height: 12),
+                      // Full-width itinerary card, outside the chat bubble so
+                      // it can use the whole content width.
+                      const ItenaryOptionCard(
+                        imageUrl: AppAssets.barelang,
+                        providerName: 'RS Awal Bros Batam',
+                        serviceName: 'Cardiac Screening Package',
+                        location: 'Batu Aji · 5 km',
+                        appointment: 'Tomorrow, 09:00',
+                        rating: 4.8,
+                        reviewCount: 212,
+                        duration: '3 days',
+                        price: 'IDR 4.5jt',
+                        recommended: true,
                       ),
                     ],
                   ),

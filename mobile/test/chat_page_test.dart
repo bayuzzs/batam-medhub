@@ -3,8 +3,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:mobile/ui/chat/chat_item.dart';
 import 'package:mobile/ui/chat/chat_options.dart';
 import 'package:mobile/ui/chat/chat_page.dart';
+import 'package:mobile/ui/core/widgets/itenary_option_card.dart';
 
 void main() {
   testWidgets('Chat screen renders greeting, assistant card, and input', (
@@ -65,7 +67,7 @@ void main() {
     expect(find.text('Here\'s a great itinerary for you:'), findsOneWidget);
     expect(find.text('Cardiac Screening Package'), findsOneWidget);
     expect(find.text('Recommended'), findsOneWidget);
-    expect(find.text('View Details Itinerary'), findsOneWidget);
+    expect(find.text('View Itinerary Details'), findsOneWidget);
 
     // Chat input with a send button.
     expect(find.byType(TextField), findsOneWidget);
@@ -114,5 +116,28 @@ void main() {
     await tester.pump();
 
     expect(find.text('Hello'), findsNothing);
+  });
+
+  testWidgets('Itinerary card renders full-width outside the chat bubble', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: ChatPage())),
+    );
+
+    final card = find.byType(ItenaryOptionCard);
+    expect(card, findsOneWidget);
+
+    // The card is NOT nested inside a chat bubble.
+    expect(
+      find.ancestor(of: card, matching: find.byType(ChatItem)),
+      findsNothing,
+    );
+
+    // It spans nearly the whole screen width (AppContainer adds screen
+    // padding, so it won't be exactly 100%).
+    final cardWidth = tester.getSize(card).width;
+    final screenWidth = tester.getSize(find.byType(Scaffold)).width;
+    expect(cardWidth, greaterThan(screenWidth * 0.8));
   });
 }

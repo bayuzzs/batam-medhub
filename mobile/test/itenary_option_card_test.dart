@@ -57,7 +57,7 @@ void main() {
     expect(find.text('IDR 4.500.000/person'), findsOneWidget);
 
     // Details action fires the callback.
-    await tester.tap(find.text('View Details Itinerary'));
+    await tester.tap(find.text('View Itinerary Details'));
     await tester.pump();
     expect(detailsTapped, isTrue);
   });
