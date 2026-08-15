@@ -138,6 +138,48 @@ func ValidateDateFormat(dateStr string) bool {
 	return err == nil
 }
 
+// ValidateTimeWindow validates that TimeWindow contains valid IANA timezones and valid RFC3339 UTC timestamps where ends_at > starts_at.
+func ValidateTimeWindow(tw TimeWindow, fieldPrefix string) []ErrorDetail {
+	var details []ErrorDetail
+	if !ValidateIanaTimezone(tw.StartTimeZone) {
+		details = append(details, ErrorDetail{
+			Field:  joinField(fieldPrefix, "start_time_zone"),
+			Reason: "must be a valid IANA time zone",
+		})
+	}
+	if !ValidateIanaTimezone(tw.EndTimeZone) {
+		details = append(details, ErrorDetail{
+			Field:  joinField(fieldPrefix, "end_time_zone"),
+			Reason: "must be a valid IANA time zone",
+		})
+	}
+	startValid := ValidateRFC3339UTC(tw.StartsAt)
+	if !startValid {
+		details = append(details, ErrorDetail{
+			Field:  joinField(fieldPrefix, "starts_at"),
+			Reason: "must be an RFC 3339 UTC timestamp ending in 'Z'",
+		})
+	}
+	endValid := ValidateRFC3339UTC(tw.EndsAt)
+	if !endValid {
+		details = append(details, ErrorDetail{
+			Field:  joinField(fieldPrefix, "ends_at"),
+			Reason: "must be an RFC 3339 UTC timestamp ending in 'Z'",
+		})
+	}
+	if startValid && endValid {
+		st, _ := time.Parse(time.RFC3339, tw.StartsAt)
+		et, _ := time.Parse(time.RFC3339, tw.EndsAt)
+		if !st.Before(et) {
+			details = append(details, ErrorDetail{
+				Field:  joinField(fieldPrefix, "ends_at"),
+				Reason: "ends_at must be strictly after starts_at",
+			})
+		}
+	}
+	return details
+}
+
 // ValidateMoney verifies that Money contains non-negative minor units and a valid 3-letter uppercase ISO currency.
 func ValidateMoney(m Money, fieldPrefix string) []ErrorDetail {
 	var details []ErrorDetail

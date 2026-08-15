@@ -21,6 +21,7 @@ import (
 	"batam-medhub/providers/internal/hospital"
 	"batam-medhub/providers/internal/hotel"
 	"batam-medhub/providers/internal/platform"
+	"batam-medhub/providers/internal/transport"
 )
 
 type Identity struct {
@@ -103,6 +104,11 @@ func Run(identity Identity) error {
 		repo := hotel.NewRepository(db)
 		svc := hotel.NewService(identity.ID, repo)
 		handler := hotel.NewHandler(svc)
+		handler.RegisterRoutes(v1)
+	} else if identity.Type == "TRANSPORT" {
+		repo := transport.NewRepository(db)
+		svc := transport.NewService(identity.ID, repo)
+		handler := transport.NewHandler(svc)
 		handler.RegisterRoutes(v1)
 	}
 
