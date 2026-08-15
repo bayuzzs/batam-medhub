@@ -121,6 +121,14 @@ func ValidateIanaTimezone(tz string) bool {
 	return ianaTimeZoneRegex.MatchString(tz)
 }
 
+// ValidateLocationCode checks the location code pattern.
+func ValidateLocationCode(code string) bool {
+	if len(code) < 2 || len(code) > 64 {
+		return false
+	}
+	return serviceCodeRegex.MatchString(code) // same ^[A-Z][A-Z0-9_]*$ pattern
+}
+
 // ValidateMoney verifies that Money contains non-negative minor units and a valid 3-letter uppercase ISO currency.
 func ValidateMoney(m Money, fieldPrefix string) []ErrorDetail {
 	var details []ErrorDetail

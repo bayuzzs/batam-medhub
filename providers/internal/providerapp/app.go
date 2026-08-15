@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"batam-medhub/providers/internal/ferry"
 	"batam-medhub/providers/internal/hospital"
 	"batam-medhub/providers/internal/platform"
 )
@@ -91,6 +92,11 @@ func Run(identity Identity) error {
 		repo := hospital.NewRepository(db)
 		svc := hospital.NewService(identity.ID, repo)
 		handler := hospital.NewHandler(svc)
+		handler.RegisterRoutes(v1)
+	} else if identity.Type == "FERRY" {
+		repo := ferry.NewRepository(db)
+		svc := ferry.NewService(identity.ID, repo)
+		handler := ferry.NewHandler(svc)
 		handler.RegisterRoutes(v1)
 	}
 
