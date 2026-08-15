@@ -35,6 +35,7 @@ type Config struct {
 	CloudflareAIModel       string
 	CloudflareAIBaseURL     string
 	CloudflareAITimeout     time.Duration
+	DemoSecret              string
 }
 
 // Load reads and validates environment configuration for the backend application.
@@ -61,6 +62,7 @@ func Load() (Config, error) {
 		CloudflareAIModel:       strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_MODEL")),
 		CloudflareAIBaseURL:     strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_BASE_URL")),
 		CloudflareAITimeout:     15 * time.Second,
+		DemoSecret:              strings.TrimSpace(os.Getenv("DEMO_SECRET")),
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = defaultHTTPAddr
@@ -100,6 +102,9 @@ func Load() (Config, error) {
 	}
 	if cfg.CloudflareAIBaseURL == "" {
 		cfg.CloudflareAIBaseURL = "https://api.cloudflare.com/client/v4"
+	}
+	if cfg.DemoSecret == "" {
+		cfg.DemoSecret = "demo_dev_secret"
 	}
 	if timeoutStr := strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_TIMEOUT_SECONDS")); timeoutStr != "" {
 		if sec, err := strconv.Atoi(timeoutStr); err == nil && sec > 0 {

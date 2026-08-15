@@ -185,6 +185,9 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 		{
 			recoveryGroup.POST("/:recovery_option_id/approve", handleApproveRecoveryOption(disruptionSvc, idemSvc))
 		}
+
+		// Demo Reset Endpoint (Auth: DemoSecret)
+		v1.POST("/demo/reset", handleDemoReset(cfg, service.NewDemoService(db), idemSvc))
 	}
 
 	return router

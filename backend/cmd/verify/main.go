@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -174,7 +175,11 @@ func main() {
 	testDisruptionAndRecoveryEngine(db, jwtSecret)
 	fmt.Println("[PASS] Disruption and recovery engine verified (provider event ingestion, deduplication, clinical validation, recovery option generation, Itinerary v2 activation, and manual review fallback).")
 
-	fmt.Println("\n=== ALL B7, B8, AND B9 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
+	// 13. Test Demo Reset Endpoint (Phase B10)
+	testDemoReset(db, dbURL, jwtSecret)
+	fmt.Println("[PASS] Demo reset endpoint verified (auth enforcement, dynamic table wipe, catalog preservation, and golden registration replay).")
+
+	fmt.Println("\n=== ALL B7, B8, B9, AND B10 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
 }
 
 func registerPatient(apiBaseURL, email, name, password, currency string) string {
@@ -1596,6 +1601,151 @@ func testDisruptionAndRecoveryEngine(db *gorm.DB, jwtSecret string) {
 	respSelect.Body.Close()
 	if v2Journey2.Journey.ActiveItineraryVersion != 2 {
 		panic("expected active itinerary version 2 on alias select")
+	}
+}
+
+func testDemoReset(db *gorm.DB, dbURL, jwtSecret string) {
+	fmt.Println("--- Running Demo Reset Endpoint Verification (B10) ---")
+
+	cfg := config.Config{
+		HTTPAddr:                ":8094",
+		DatabaseURL:             dbURL,
+		JWTSigningSecret:        jwtSecret,
+		JWTIssuer:               "batam-medhub",
+		JWTAudience:             "batam-medhub-mobile",
+		JWTAccessTTL:            15 * time.Minute,
+		RefreshTokenTTL:         30 * 24 * time.Hour,
+		HospitalBaseURL:         "http://localhost:8081",
+		HospitalIntegrationKey:  "hospital_dev_secret",
+		FerryBaseURL:            "http://localhost:8082",
+		FerryIntegrationKey:     "ferry_dev_secret",
+		HotelBaseURL:            "http://localhost:8083",
+		HotelIntegrationKey:     "hotel_dev_secret",
+		TransportBaseURL:        "http://localhost:8084",
+		TransportIntegrationKey: "transport_dev_secret",
+		ProviderTimeout:         5 * time.Second,
+		DemoSecret:              "demo_test_secret",
+	}
+
+	cleanupProviderDatabases(cfg.DatabaseURL)
+	defer cleanupProviderDatabases(cfg.DatabaseURL)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	router := httpapi.New(db, cfg, logger)
+	testServer := httptest.NewServer(router)
+	defer testServer.Close()
+
+	// 1. Populate some dynamic state
+	goldenEmail := fmt.Sprintf("golden_demo_patient_%d@example.test", time.Now().UnixNano())
+	token := registerPatient(testServer.URL, goldenEmail, "Golden Demo Patient", "Password123!", "SGD")
+	tripID := createMatchedTripRequest(testServer.URL, token)
+	planRes := generatePlans(testServer.URL, token, tripID)
+	_ = confirmPlanOption(testServer.URL, token, planRes.Options[0].ID, fmt.Sprintf("idem-demo-book-%d", time.Now().UnixNano()))
+
+	// Verify state is populated in db
+	var patientCount, tripCount, journeyCount int64
+	db.Model(&model.Patient{}).Count(&patientCount)
+	db.Model(&model.TripRequest{}).Count(&tripCount)
+	db.Model(&model.Journey{}).Count(&journeyCount)
+	if patientCount == 0 || tripCount == 0 || journeyCount == 0 {
+		panic("expected database to have dynamic patient, trip, and journey records before reset")
+	}
+
+	// 2. Test Auth Enforcement: Missing header -> 401
+	validBody, _ := json.Marshal(map[string]any{
+		"scenario": "DEFAULT",
+		"confirm":  true,
+	})
+	reqNoAuth, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/demo/reset", bytes.NewReader(validBody))
+	reqNoAuth.Header.Set("Content-Type", "application/json")
+	respNoAuth, err := http.DefaultClient.Do(reqNoAuth)
+	if err != nil || respNoAuth.StatusCode != http.StatusUnauthorized {
+		panic(fmt.Sprintf("expected 401 on missing demo secret header, got %d", respNoAuth.StatusCode))
+	}
+	respNoAuth.Body.Close()
+
+	// 3. Test Auth Enforcement: Wrong secret -> 401
+	reqWrongAuth, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/demo/reset", bytes.NewReader(validBody))
+	reqWrongAuth.Header.Set("X-Demo-Key", "wrong_secret")
+	reqWrongAuth.Header.Set("Content-Type", "application/json")
+	respWrongAuth, err := http.DefaultClient.Do(reqWrongAuth)
+	if err != nil || respWrongAuth.StatusCode != http.StatusUnauthorized {
+		panic(fmt.Sprintf("expected 401 on incorrect demo secret header, got %d", respWrongAuth.StatusCode))
+	}
+	respWrongAuth.Body.Close()
+
+	// 4. Test Schema Validation: Invalid scenario -> 400
+	badScenarioBody, _ := json.Marshal(map[string]any{
+		"scenario": "UNKNOWN_SCENARIO",
+		"confirm":  true,
+	})
+	reqBadScen, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/demo/reset", bytes.NewReader(badScenarioBody))
+	reqBadScen.Header.Set("X-Demo-Key", "demo_test_secret")
+	reqBadScen.Header.Set("Content-Type", "application/json")
+	respBadScen, err := http.DefaultClient.Do(reqBadScen)
+	if err != nil || respBadScen.StatusCode != http.StatusBadRequest {
+		panic(fmt.Sprintf("expected 400 on invalid scenario, got %d", respBadScen.StatusCode))
+	}
+	respBadScen.Body.Close()
+
+	// 5. Test Schema Validation: confirm = false -> 400
+	unconfirmedBody, _ := json.Marshal(map[string]any{
+		"scenario": "DEFAULT",
+		"confirm":  false,
+	})
+	reqUnconf, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/demo/reset", bytes.NewReader(unconfirmedBody))
+	reqUnconf.Header.Set("X-Demo-Secret", "demo_test_secret")
+	reqUnconf.Header.Set("Content-Type", "application/json")
+	respUnconf, err := http.DefaultClient.Do(reqUnconf)
+	if err != nil || respUnconf.StatusCode != http.StatusBadRequest {
+		panic(fmt.Sprintf("expected 400 on confirm=false, got %d", respUnconf.StatusCode))
+	}
+	respUnconf.Body.Close()
+
+	// 6. Test Successful Demo Reset -> 200 OK
+	resetIdemKey := fmt.Sprintf("idem-reset-%d", time.Now().UnixNano())
+	reqReset, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/demo/reset", bytes.NewReader(validBody))
+	reqReset.Header.Set("X-Demo-Key", "demo_test_secret")
+	reqReset.Header.Set("Idempotency-Key", resetIdemKey)
+	reqReset.Header.Set("Content-Type", "application/json")
+	respReset, err := http.DefaultClient.Do(reqReset)
+	if err != nil || respReset.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(respReset.Body)
+		panic(fmt.Sprintf("expected 200 OK on demo reset, got %d: %s", respReset.StatusCode, string(raw)))
+	}
+	var resetResp service.DemoResetResponse
+	_ = json.NewDecoder(respReset.Body).Decode(&resetResp)
+	respReset.Body.Close()
+
+	if resetResp.Status != "RESET" || resetResp.Scenario != "DEFAULT" || resetResp.ResetAt.IsZero() {
+		panic(fmt.Sprintf("invalid reset response structure: %+v", resetResp))
+	}
+
+	// 7. Verify dynamic tables are now completely empty
+	var afterPatients, afterTrips, afterJourneys, afterVersions, afterDisruptions int64
+	db.Model(&model.Patient{}).Count(&afterPatients)
+	db.Model(&model.TripRequest{}).Count(&afterTrips)
+	db.Model(&model.Journey{}).Count(&afterJourneys)
+	db.Model(&model.ItineraryVersion{}).Count(&afterVersions)
+	db.Model(&model.Disruption{}).Count(&afterDisruptions)
+
+	if afterPatients != 0 || afterTrips != 0 || afterJourneys != 0 || afterVersions != 0 || afterDisruptions != 0 {
+		panic(fmt.Sprintf("expected all dynamic tables to be 0 after reset, got patients=%d, trips=%d, journeys=%d, versions=%d, disruptions=%d",
+			afterPatients, afterTrips, afterJourneys, afterVersions, afterDisruptions))
+	}
+
+	// 8. Verify reference catalogs are preserved intact
+	var serviceCount, providerCount int64
+	db.Model(&model.MedicalService{}).Count(&serviceCount)
+	db.Model(&model.Provider{}).Count(&providerCount)
+	if serviceCount == 0 || providerCount == 0 {
+		panic("expected static medical services and providers to remain intact after demo reset")
+	}
+
+	// 9. Replay golden patient registration flow to verify repeatable re-registration
+	tokenReplay := registerPatient(testServer.URL, goldenEmail, "Golden Demo Patient", "Password123!", "SGD")
+	if tokenReplay == "" {
+		panic("expected successful re-registration of golden patient after demo reset")
 	}
 }
 
