@@ -4,13 +4,17 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mobile/application/auth/auth_controller.dart';
 import 'package:mobile/application/auth/providers.dart';
+import 'package:mobile/models/journey.dart';
+import 'package:mobile/models/plan_option.dart';
 import 'package:mobile/ui/auth/login_page.dart';
 import 'package:mobile/ui/auth/onboarding_page.dart';
 import 'package:mobile/ui/auth/register_page.dart';
 import 'package:mobile/ui/chat/chat_page.dart';
 import 'package:mobile/ui/core/theme/app_assets.dart';
 import 'package:mobile/ui/history/history_page.dart';
+import 'package:mobile/ui/itinerary/active_itinerary_page.dart';
 import 'package:mobile/ui/itinerary/itinerary_journey_detail_page.dart';
+import 'package:mobile/ui/itinerary/plan_detail_page.dart';
 import 'package:mobile/ui/profile/profile_page.dart';
 
 /// Route path constants, kept in one place so screens never hard-code
@@ -23,6 +27,8 @@ abstract final class AppRoutes {
   static const String history = '/history';
   static const String profile = '/profile';
   static const String itinerary = '/itinerary';
+  static const String planDetail = '/plan';
+  static const String activeItinerary = '/active-itinerary';
 }
 
 /// Central [GoRouter] configuration used by [MaterialApp.router].
@@ -101,6 +107,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           price: 'IDR 4.5jt',
         ),
       ),
+      // Itemized plan detail, pushed from a plan option card in the chat.
+      // The selected [PlanOption] is passed via `state.extra`.
+      GoRoute(
+        path: AppRoutes.planDetail,
+        builder: (context, state) =>
+            PlanDetailPage(option: state.extra! as PlanOption),
+      ),
+      // Active itinerary, shown after a plan is booked. The confirmed
+      // [JourneyDetail] is passed via `state.extra`; it replaces the booking
+      // flow so the patient lands on their journey instead of the chat.
+      GoRoute(
+        path: AppRoutes.activeItinerary,
+        builder: (context, state) =>
+            ActiveItineraryPage(detail: state.extra! as JourneyDetail),
+      ),
     ],
   );
 
@@ -147,4 +168,16 @@ extension AppRouterX on BuildContext {
   // Itinerary journey detail.
   void pushItinerary() => push(AppRoutes.itinerary);
   void goItinerary() => replace(AppRoutes.itinerary);
+
+  // Itemized plan detail (pass the [PlanOption] via extra).
+  void pushPlanDetail(PlanOption option) =>
+      push(AppRoutes.planDetail, extra: option);
+  void goPlanDetail(PlanOption option) =>
+      replace(AppRoutes.planDetail, extra: option);
+
+  // Active itinerary (pass the confirmed [JourneyDetail] via extra).
+  void pushActiveItinerary(JourneyDetail detail) =>
+      push(AppRoutes.activeItinerary, extra: detail);
+  void goActiveItinerary(JourneyDetail detail) =>
+      replace(AppRoutes.activeItinerary, extra: detail);
 }

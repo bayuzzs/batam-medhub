@@ -12,6 +12,11 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
   `appRouterProvider`.
 - `lib/application/` — app-level orchestration / global state (Riverpod). One folder per concern:
   - `lib/application/auth/` — auth state & wiring: `auth_controller.dart`, `providers.dart`
+  - `lib/application/journey/` — journey DI wiring: `providers.dart`
+    (`journeyRepositoryProvider` → `FakeJourneyRepository`/`JourneyRepositoryImpl`
+    behind `kUseFakeBackend`; overridable in tests)
+  - `lib/application/chat/` — chat conversation state: `chat_controller.dart`
+    (`ChatController` + `ChatState`), `providers.dart` (`chatControllerProvider`)
 - `lib/ui/` — feature-based UI. Group screens/widgets by feature, one folder per feature.
   - `lib/ui/<feature>/` — e.g. `lib/ui/auth/`, `lib/ui/chat/`, `lib/ui/history/`,
     `lib/ui/profile/`, `lib/ui/itinerary/`
@@ -21,11 +26,19 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
     - `lib/ui/core/widgets/` — reusable widgets & validation:
       `app_container.dart`, `app_text_field.dart`, `app_validators.dart`,
       `primary_radial_gradient.dart`, `itenary_option_card.dart`, and others
+    - `lib/ui/core/utils/` — formatting helpers: `money_formatter.dart`,
+      `time_window_format.dart` (`formatWindow`/`formatWindowWithZone`),
+      `provider_label.dart` (`formatProviderLabel`)
     - `lib/ui/core/navigation/` — routing: `app_router.dart`
 - `lib/data/` — data layer (no UI imports here)
-  - `lib/data/repository/` — data repositories (fetch/sync domain data, abstracts + impls)
-  - `lib/data/service/` — services (API/network clients, platform integrations)
-- `lib/models/` — plain data models / DTOs
+  - `lib/data/repository/` — data repositories (fetch/sync domain data, abstracts + impls):
+    `journey_repository.dart` (abstract + `JourneyException`), `journey_repository_impl.dart`
+    (Dio), `fake_journey_repository.dart` (deterministic in-memory demo, default)
+  - `lib/data/service/` — services (API/network clients, platform integrations):
+    `journey_api.dart` + `dio_journey_api.dart` (trip request → plans → confirm → itinerary)
+- `lib/models/` — plain data models / DTOs: journey domain models `money.dart`,
+  `time_window.dart`, `structured_intent.dart`, `trip_request.dart`, `plan_option.dart`,
+  `journey.dart`, `medical_service.dart` (freezed + json_serializable)
 
 ## Naming conventions
 
@@ -99,6 +112,60 @@ services) and `lib/models/` (session/profile DTOs).
   on success the router redirects to `/chat`. `ProfilePage` shows the session's
   patient profile and a Log Out action.
 
+## Journey orchestration & chat
+
+Journey state lives in `lib/application/chat/` + `lib/application/journey/`; the
+UI lives in `lib/ui/chat/` and models in `lib/models/`.
+
+- **`ChatController`** (`lib/application/chat/chat_controller.dart`) — a Riverpod
+  `Notifier<ChatState>`. `ChatState` holds the message list (`List<ChatMessage>`),
+  the current `TripRequestDetail`/`TripRequest`, and `isSending`. `send(text)`:
+  appends a user bubble, creates a trip request, and routes on the
+  `IntentResolution` returned by the fake backend — `needsClarification` asks a
+  follow-up question (subsequent `send()`s call `answerClarification` until the
+  intent `matched`), `matched` generates plans, and unsupported/out-of-scope
+  services return the reason. Selecting a plan option calls
+  `confirmPlanOption`, which shows a "Booking…" status and then a confirmation
+  message.
+- **`FakeJourneyRepository`** (`lib/data/repository/fake_journey_repository.dart`)
+  is the deterministic demo backend used by default (see `kUseFakeBackend` in
+  `lib/application/journey/providers.dart`): it returns a needs-clarification
+  trip request, a matched intent, two plan options (recommended rank 1, total
+  SGD 251.90), and a confirmed active journey. It throws
+  `JourneyException(message, code:)` for unknown ids. Override
+  `journeyRepositoryProvider` in tests with `FakeJourneyRepository(delay:
+  Duration.zero)`.
+- **Models**: money uses integer minor units + ISO currency
+  (`Money`/`ConvertedMoney`/`PriceSummary`, `fx_rate` is a String);
+  `DateWindow`/`TimeWindow` use UTC instants with IANA zone strings
+  (`startTimeZone`). Note: freezed/json_serializable use the default
+  `explicitToJson: false`, so `toJson()` emits nested objects — round-trips in
+  tests go through `jsonDecode(jsonEncode(toJson()))`. Date-only fixture strings
+  (e.g. `"2026-08-22"`) parse as **local** `DateTime`, not UTC.
+- **UI**: `lib/ui/chat/chat_page.dart` is a `ConsumerStatefulWidget` that renders
+  the live conversation from `chatControllerProvider` (`ChatItem` bubbles, a
+  `_TypingIndicator`, and `PlanOptionCard`s via `_PlanOptionsList`).
+  `lib/ui/chat/plan_option_card.dart` shows the service title, provider,
+  time window, formatted total (`MoneyFormatter`, `lib/ui/core/utils/money_formatter.dart`),
+  explanation, and a "View Details" action that pushes
+  `lib/ui/itinerary/plan_detail_page.dart` (`/plan`, `context.pushPlanDetail(option)`,
+  option passed via `state.extra`); the rank-1 option carries a
+  "Recommended" banner. Booking happens only on the detail screen (chat cards
+  never confirm directly). `PlanDetailPage` renders the hospital
+  summary, an **itemized journey timeline** (each leg's time, type, provider,
+  per-leg price and operational notes via `MoneyFormatter`/`formatWindow`/`formatProviderLabel`),
+  the planner's explanation, and a pinned "Book this journey" action that
+  confirms the option and then opens `lib/ui/itinerary/active_itinerary_page.dart`
+  (`/active-itinerary`, `context.goActiveItinerary(journey)`) — the patient
+  lands on their confirmed journey, **not** back in the chat. `ActiveItineraryPage`
+  renders the `JourneyDetail` returned by `confirmPlanOption`: a status banner
+  ("Journey active" + booking ref), the hospital summary + total, and the
+  active itinerary's booked legs as a timeline with `ItineraryItemStatus` chips.
+  Item-type labels/icons are shared via `lib/ui/core/utils/item_type_presentation.dart`.
+  `chat_options.dart` holds shared chat UI helpers. Times are shown in
+  device-local time; money in the display currency (`.display` on
+  `ConvertedMoney`).
+
 ## Reuse before you create
 
 - **Reuse existing components** whenever possible. Before creating a new widget,
@@ -126,3 +193,11 @@ services) and `lib/models/` (session/profile DTOs).
   then assert the resulting screen) rather than launching the app to eyeball it.
 - Use `flutter analyze` to confirm there are no lint/compile issues before
   finishing UI changes.
+- Journey-related tests: `test/journey_models_test.dart` (model round-trips +
+  fixtures in `test/fixtures/core/`), `test/fake_journey_repository_test.dart`
+  (full request→plans→confirm flow + errors),
+  `test/chat_controller_test.dart` (conversation state machine + error bubble),
+  `test/chat_page_test.dart` (renders greeting, typing + send, clarification,
+  plan cards, and booking confirmation),
+  `test/plan_detail_page_test.dart` (itemized plan rendering, View Details
+  navigation from a chat plan card, and booking from the detail screen).

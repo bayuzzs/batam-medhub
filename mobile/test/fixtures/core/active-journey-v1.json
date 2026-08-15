@@ -1,0 +1,257 @@
+{
+  "journey": {
+    "id": "journey-000001",
+    "trip_request_id": "trip-000001",
+    "status": "ACTIVE",
+    "active_itinerary_version": 1,
+    "created_at": "2026-08-15T08:02:00Z",
+    "updated_at": "2026-08-15T08:02:00Z"
+  },
+  "active_itinerary": {
+    "id": "itinerary-000001-v1",
+    "journey_id": "journey-000001",
+    "version": 1,
+    "status": "ACTIVE",
+    "based_on_disruption_id": null,
+    "total_price": {
+      "source_totals": [
+        {
+          "amount_minor": 10000,
+          "currency": "SGD"
+        },
+        {
+          "amount_minor": 180000000,
+          "currency": "IDR"
+        }
+      ],
+      "display_total": {
+        "amount_minor": 25190,
+        "currency": "SGD"
+      },
+      "estimated": true
+    },
+    "items": [
+      {
+        "id": "item-v1-ferry-out",
+        "item_type": "FERRY_OUTBOUND",
+        "provider_id": "ferry-demo-01",
+        "external_reservation_id": "ferry-res-000001",
+        "title": "HarbourFront to Batam Centre",
+        "status": "CONFIRMED",
+        "time_window": {
+          "starts_at": "2026-08-21T23:30:00Z",
+          "ends_at": "2026-08-22T00:40:00Z",
+          "start_time_zone": "Asia/Singapore",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "HARBOURFRONT_SG",
+        "destination_code": "BATAM_CENTRE_ID",
+        "price": {
+          "source": {
+            "amount_minor": 5000,
+            "currency": "SGD"
+          },
+          "display": {
+            "amount_minor": 5000,
+            "currency": "SGD"
+          },
+          "fx_rate": "1.000000",
+          "fx_source": "DEMO_STATIC_2026_08",
+          "fx_effective_at": "2026-08-01T00:00:00Z",
+          "estimated": true
+        },
+        "operational_notes": [
+          "Check in at least 60 minutes before departure."
+        ],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-arrival-buffer",
+        "item_type": "ARRIVAL_BUFFER",
+        "provider_id": null,
+        "external_reservation_id": null,
+        "title": "Immigration and arrival buffer",
+        "status": "BUFFER",
+        "time_window": {
+          "starts_at": "2026-08-22T00:40:00Z",
+          "ends_at": "2026-08-22T01:25:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "BATAM_CENTRE_ID",
+        "destination_code": "BATAM_CENTRE_ID",
+        "price": null,
+        "operational_notes": [],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-transfer-out",
+        "item_type": "TRANSPORT_PICKUP",
+        "provider_id": "transport-demo-01",
+        "external_reservation_id": "transport-res-000001",
+        "title": "Terminal pickup to hospital",
+        "status": "CONFIRMED",
+        "time_window": {
+          "starts_at": "2026-08-22T01:25:00Z",
+          "ends_at": "2026-08-22T02:10:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "BATAM_CENTRE_ID",
+        "destination_code": "HOSPITAL_DEMO_ID",
+        "price": {
+          "source": {
+            "amount_minor": 15000000,
+            "currency": "IDR"
+          },
+          "display": {
+            "amount_minor": 1266,
+            "currency": "SGD"
+          },
+          "fx_rate": "0.0000843882",
+          "fx_source": "DEMO_STATIC_2026_08",
+          "fx_effective_at": "2026-08-01T00:00:00Z",
+          "estimated": true
+        },
+        "operational_notes": [],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-hospital",
+        "item_type": "HOSPITAL_APPOINTMENT",
+        "provider_id": "hospital-demo-01",
+        "external_reservation_id": "hospital-res-000001",
+        "title": "Basic Medical Check-up",
+        "status": "CONFIRMED",
+        "time_window": {
+          "starts_at": "2026-08-22T03:00:00Z",
+          "ends_at": "2026-08-22T05:00:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "HOSPITAL_DEMO_ID",
+        "destination_code": "HOSPITAL_DEMO_ID",
+        "price": {
+          "source": {
+            "amount_minor": 150000000,
+            "currency": "IDR"
+          },
+          "display": {
+            "amount_minor": 12658,
+            "currency": "SGD"
+          },
+          "fx_rate": "0.0000843882",
+          "fx_source": "DEMO_STATIC_2026_08",
+          "fx_effective_at": "2026-08-01T00:00:00Z",
+          "estimated": true
+        },
+        "operational_notes": [
+          "Follow only the preparation instructions supplied by the hospital."
+        ],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-transfer-return",
+        "item_type": "TRANSPORT_DROPOFF",
+        "provider_id": "transport-demo-01",
+        "external_reservation_id": "transport-res-000002",
+        "title": "Hospital to terminal",
+        "status": "CONFIRMED",
+        "time_window": {
+          "starts_at": "2026-08-22T05:30:00Z",
+          "ends_at": "2026-08-22T06:15:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "HOSPITAL_DEMO_ID",
+        "destination_code": "BATAM_CENTRE_ID",
+        "price": {
+          "source": {
+            "amount_minor": 15000000,
+            "currency": "IDR"
+          },
+          "display": {
+            "amount_minor": 1266,
+            "currency": "SGD"
+          },
+          "fx_rate": "0.0000843882",
+          "fx_source": "DEMO_STATIC_2026_08",
+          "fx_effective_at": "2026-08-01T00:00:00Z",
+          "estimated": true
+        },
+        "operational_notes": [],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-departure-buffer",
+        "item_type": "DEPARTURE_BUFFER",
+        "provider_id": null,
+        "external_reservation_id": null,
+        "title": "Return ferry check-in buffer",
+        "status": "BUFFER",
+        "time_window": {
+          "starts_at": "2026-08-22T06:15:00Z",
+          "ends_at": "2026-08-22T07:00:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Jakarta"
+        },
+        "origin_code": "BATAM_CENTRE_ID",
+        "destination_code": "BATAM_CENTRE_ID",
+        "price": null,
+        "operational_notes": [],
+        "synthetic": true,
+        "source": "MOCK"
+      },
+      {
+        "id": "item-v1-ferry-return",
+        "item_type": "FERRY_RETURN",
+        "provider_id": "ferry-demo-01",
+        "external_reservation_id": "ferry-res-000002",
+        "title": "Batam Centre to HarbourFront",
+        "status": "CONFIRMED",
+        "time_window": {
+          "starts_at": "2026-08-22T07:30:00Z",
+          "ends_at": "2026-08-22T08:40:00Z",
+          "start_time_zone": "Asia/Jakarta",
+          "end_time_zone": "Asia/Singapore"
+        },
+        "origin_code": "BATAM_CENTRE_ID",
+        "destination_code": "HARBOURFRONT_SG",
+        "price": {
+          "source": {
+            "amount_minor": 5000,
+            "currency": "SGD"
+          },
+          "display": {
+            "amount_minor": 5000,
+            "currency": "SGD"
+          },
+          "fx_rate": "1.000000",
+          "fx_source": "DEMO_STATIC_2026_08",
+          "fx_effective_at": "2026-08-01T00:00:00Z",
+          "estimated": true
+        },
+        "operational_notes": [
+          "Check in at least 30 minutes before departure."
+        ],
+        "synthetic": true,
+        "source": "MOCK"
+      }
+    ],
+    "created_at": "2026-08-15T08:02:00Z"
+  },
+  "itinerary_versions": [
+    {
+      "id": "itinerary-000001-v1",
+      "version": 1,
+      "status": "ACTIVE",
+      "based_on_disruption_id": null,
+      "created_at": "2026-08-15T08:02:00Z"
+    }
+  ]
+}

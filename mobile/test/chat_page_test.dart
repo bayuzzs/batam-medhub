@@ -1,20 +1,42 @@
 // Widget smoke tests for the AI chat screen.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:mobile/ui/chat/chat_item.dart';
-import 'package:mobile/ui/chat/chat_options.dart';
+import 'package:mobile/application/journey/providers.dart';
+import 'package:mobile/data/repository/fake_journey_repository.dart';
 import 'package:mobile/ui/chat/chat_page.dart';
-import 'package:mobile/ui/core/widgets/itenary_option_card.dart';
+import 'package:mobile/ui/chat/plan_option_card.dart';
+
+/// Pumps the chat screen with an instant fake journey backend so the
+/// conversation can be driven end-to-end without real timers. Uses a tall
+/// viewport so lazy `ListView.builder` keeps every message built on screen.
+Future<void> _pumpChat(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(800, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  SharedPreferences.setMockInitialValues({});
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        journeyRepositoryProvider.overrideWithValue(
+          FakeJourneyRepository(delay: Duration.zero),
+        ),
+      ],
+      child: const MaterialApp(home: Scaffold(body: ChatPage())),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('Chat screen renders greeting, assistant card, and input', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: ChatPage())),
-    );
+    await _pumpChat(tester);
 
     // Greeting texts.
     expect(find.text('Hi, Name'), findsOneWidget);
@@ -29,45 +51,12 @@ void main() {
       findsOneWidget,
     );
 
-    // Assistant card.
+    // Assistant card and the seeded assistant greeting bubble.
     expect(find.text('Talk with your AI Assistant'), findsOneWidget);
-
-    // Placeholder chat items (user + assistant).
     expect(
-      find.text('I need help planning my medical trip to Batam'),
+      find.textContaining('for example a same-day check-up in Batam'),
       findsOneWidget,
     );
-    expect(
-      find.text(
-        'Of course! I\'ll orchestrate the best medical journey for you.',
-      ),
-      findsOneWidget,
-    );
-
-    // Assistant item with selectable option cards.
-    expect(find.text('Which hospital would you prefer?'), findsOneWidget);
-
-    // Hospital options live inside ChatOptions; the itinerary card below
-    // reuses 'RS Awal Bros Batam' as its provider name, so scope the finds.
-    final options = find.byType(ChatOptions);
-    expect(
-      find.descendant(of: options, matching: find.text('RS Awal Bros Batam')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: options, matching: find.text('RS Hermina Batam')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: options, matching: find.text('RSUD Embung Fatimah')),
-      findsOneWidget,
-    );
-
-    // Example itinerary option card.
-    expect(find.text('Here\'s a great itinerary for you:'), findsOneWidget);
-    expect(find.text('Cardiac Screening Package'), findsOneWidget);
-    expect(find.text('Recommended'), findsOneWidget);
-    expect(find.text('View Itinerary Details'), findsOneWidget);
 
     // Pinned top bar: History (left) and Profile (right).
     expect(find.byKey(const Key('chat_history_button')), findsOneWidget);
@@ -78,69 +67,50 @@ void main() {
     expect(find.byKey(const Key('chat_send_button')), findsOneWidget);
   });
 
-  testWidgets('Selecting a hospital option highlights it', (
-    WidgetTester tester,
-  ) async {
-    await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: ChatPage())),
-    );
-
-    // The options sit below the fold in the test viewport; bring them into
-    // view before tapping.
-    final option = find.text('RS Hermina Batam');
-    await tester.ensureVisible(option);
-    await tester.pumpAndSettle();
-
-    await tester.tap(option);
-    await tester.pump();
-
-    // The option card is still present; selection is tracked internally.
-    final options = find.byType(ChatOptions);
-    expect(
-      find.descendant(of: options, matching: find.text('RS Hermina Batam')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: options, matching: find.text('RS Awal Bros Batam')),
-      findsOneWidget,
-    );
-  });
-
   testWidgets('Typing a message and tapping send clears the input', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: ChatPage())),
-    );
+    await _pumpChat(tester);
 
-    await tester.enterText(find.byType(TextField), 'Hello');
-    expect(find.text('Hello'), findsOneWidget);
-
+    final field = find.byType(TextField);
+    await tester.enterText(field, 'Hello');
     await tester.tap(find.byKey(const Key('chat_send_button')));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('Hello'), findsNothing);
+    // The input is cleared, and the typed text became a user bubble.
+    final textField = tester.widget<TextField>(field);
+    expect(textField.controller!.text, isEmpty);
+    expect(find.text('Hello'), findsOneWidget);
   });
 
-  testWidgets('Itinerary card renders full-width outside the chat bubble', (
+  testWidgets('Sending a request walks the trip-request conversation', (
     WidgetTester tester,
   ) async {
-    // ChatPage owns its Scaffold, so pump it directly (no outer wrapper).
-    await tester.pumpWidget(const MaterialApp(home: ChatPage()));
+    await _pumpChat(tester);
 
-    final card = find.byType(ItenaryOptionCard);
-    expect(card, findsOneWidget);
+    // Ask for help → the assistant asks a clarification question.
+    await tester.enterText(
+      find.byType(TextField),
+      'I need a check-up in Batam',
+    );
+    await tester.tap(find.byKey(const Key('chat_send_button')));
+    await tester.pumpAndSettle();
 
-    // The card is NOT nested inside a chat bubble.
+    expect(find.text('I need a check-up in Batam'), findsOneWidget);
     expect(
-      find.ancestor(of: card, matching: find.byType(ChatItem)),
-      findsNothing,
+      find.textContaining('basic or comprehensive check-up'),
+      findsOneWidget,
     );
 
-    // It spans nearly the whole screen width (AppContainer adds screen
-    // padding, so it won't be exactly 100%).
-    final cardWidth = tester.getSize(card).width;
-    final screenWidth = tester.getSize(find.byType(Scaffold)).width;
-    expect(cardWidth, greaterThan(screenWidth * 0.8));
+    // Answer the clarification → plan cards appear.
+    await tester.enterText(find.byType(TextField), 'Basic, next Friday please');
+    await tester.tap(find.byKey(const Key('chat_send_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PlanOptionCard), findsNWidgets(2));
+    // Chat cards lead to the detail screen; booking happens only there.
+    expect(find.text('View Details'), findsNWidgets(2));
+    expect(find.text('Book this journey'), findsNothing);
+    expect(find.text('Recommended'), findsOneWidget);
   });
 }

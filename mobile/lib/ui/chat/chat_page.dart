@@ -1,48 +1,83 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import 'package:mobile/application/auth/providers.dart'
+    show authControllerProvider;
+import 'package:mobile/application/chat/chat_controller.dart' show ChatState;
+import 'package:mobile/application/chat/providers.dart';
+import 'package:mobile/models/plan_option.dart';
+import 'package:mobile/ui/core/navigation/app_router.dart';
 import 'package:mobile/ui/core/theme/app_assets.dart';
 import 'package:mobile/ui/core/theme/app_colors.dart';
-import 'package:mobile/ui/core/navigation/app_router.dart';
-import 'package:mobile/ui/core/widgets/app_container.dart';
-import 'package:mobile/ui/core/widgets/itenary_option_card.dart';
 import 'package:mobile/ui/core/theme/app_spacing.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
 import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 import 'package:mobile/ui/chat/chat_item.dart';
-import 'package:mobile/ui/chat/chat_options.dart';
+import 'package:mobile/ui/chat/chat_message.dart';
+import 'package:mobile/ui/chat/plan_option_card.dart';
 
 /// AI chat screen — the app's primary authenticated screen.
 ///
 /// Has a pinned top bar with **History** (top left) and **Profile** (top
 /// right) actions; both push full-screen pages. Greets the user, shows a card
-/// introducing the AI assistant, and pins a message input at the bottom of
-/// the screen. Pure UI — chat/AI integration is not wired up yet.
-class ChatPage extends StatefulWidget {
+/// introducing the AI assistant, and pins a multiline message input at the
+/// bottom. The conversation is driven by [chatControllerProvider], which walks
+/// the trip-request state machine: the patient's typed text becomes a user
+/// bubble, the assistant replies with a clarification question or plan cards,
+/// and selecting a plan books the journey.
+class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key});
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends ConsumerState<ChatPage> {
   final _messageController = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void dispose() {
     _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   void _sendMessage() {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
-    // TODO(chat): send the message to the AI assistant service once integrated.
     _messageController.clear();
+    ref.read(chatControllerProvider.notifier).send(message);
+  }
+
+  /// The patient's initial for the user avatar, from the authenticated
+  /// profile (falls back to a neutral letter when unavailable).
+  String get _userInitial {
+    final session = ref.read(authControllerProvider).session;
+    final name = session?.profile.fullName.trim() ?? '';
+    return name.isEmpty ? 'H' : name[0].toUpperCase();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final chat = ref.watch(chatControllerProvider);
+
+    ref.listen<ChatState>(chatControllerProvider, (_, _) {
+      _scrollToBottom();
+    });
 
     return Scaffold(
       body: Stack(
@@ -80,10 +115,10 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 Expanded(
                   child: AppContainer(
-                    scrollable: true,
                     vertical: 40,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: ListView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.only(bottom: 16),
                       children: [
                         const SizedBox(height: 24),
                         Text(
@@ -93,12 +128,12 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         ),
                         const SizedBox(height: 8),
+                        // Decorative landmark behind the texts, anchored to
+                        // the bottom-right of the header. Overflows its stack
+                        // on purpose, so clipping is disabled.
                         Stack(
                           clipBehavior: Clip.none,
                           children: [
-                            // Decorative landmark behind the texts, anchored to
-                            // the bottom-right of the header. Overflows the stack
-                            // bounds on purpose, so clipping is disabled.
                             Positioned(
                               right: -40,
                               bottom: -40,
@@ -127,63 +162,13 @@ class _ChatPageState extends State<ChatPage> {
                         const SizedBox(height: 24),
                         const _AssistantCard(),
                         const SizedBox(height: 24),
-                        const ChatItem.user(
-                          message:
-                              'I need help planning my medical trip to Batam',
-                          userInitial: 'H',
-                        ),
-                        const SizedBox(height: 12),
-                        const ChatItem.assistant(
-                          message:
-                              'Of course! I\'ll orchestrate the best '
-                              'medical journey for you.',
-                        ),
-                        const SizedBox(height: 12),
-                        const ChatItem.assistant(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Which hospital would you prefer?'),
-                              SizedBox(height: 12),
-                              ChatOptions(
-                                options: [
-                                  (
-                                    label: 'RS Awal Bros Batam',
-                                    subtitle: 'Batu Aji · 5 km',
-                                  ),
-                                  (
-                                    label: 'RS Hermina Batam',
-                                    subtitle: 'Batam Center · 7 km',
-                                  ),
-                                  (
-                                    label: 'RSUD Embung Fatimah',
-                                    subtitle: 'Sekupang · 9 km',
-                                  ),
-                                ],
-                              ),
-                            ],
+                        // The conversation scrolls together with the header
+                        // and assistant card as one scrollable column.
+                        for (final message in chat.messages)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _buildMessage(message),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        const ChatItem.assistant(
-                          message: 'Here\'s a great itinerary for you:',
-                        ),
-                        const SizedBox(height: 12),
-                        // Full-width itinerary card, outside the chat bubble so
-                        // it can use the whole content width.
-                        ItenaryOptionCard(
-                          imageUrl: AppAssets.hospitalAwalBros,
-                          providerName: 'RS Awal Bros Batam',
-                          serviceName: 'Cardiac Screening Package',
-                          location: 'Batu Aji · 5 km',
-                          appointment: 'Tomorrow, 09:00',
-                          rating: 4.8,
-                          reviewCount: 212,
-                          duration: '3 days',
-                          price: 'IDR 4.5jt',
-                          recommended: true,
-                          onViewDetails: () => context.pushItinerary(),
-                        ),
                       ],
                     ),
                   ),
@@ -205,6 +190,112 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMessage(ChatMessage message) {
+    if (message.planOptions != null) {
+      return _PlanOptionsList(
+        options: message.planOptions!,
+        onViewDetails: (option) => context.pushPlanDetail(option),
+      );
+    }
+    if (message.isTyping) {
+      return const ChatItem.assistant(child: _TypingIndicator());
+    }
+    final text = message.text ?? '';
+    return message.role == ChatRole.user
+        ? ChatItem.user(message: text, userInitial: _userInitial)
+        : ChatItem.assistant(message: text);
+  }
+}
+
+/// A column of [PlanOptionCard]s rendered full-width (outside the chat bubble
+/// so each card can use the whole content width). Cards only open the plan
+/// detail screen; booking happens there.
+class _PlanOptionsList extends StatelessWidget {
+  const _PlanOptionsList({required this.options, required this.onViewDetails});
+
+  final List<PlanOption> options;
+  final ValueChanged<PlanOption> onViewDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final option in options) ...[
+          PlanOptionCard(
+            option: option,
+            onViewDetails: () => onViewDetails(option),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+}
+
+/// Transient "assistant is typing" indicator shown inside a chat bubble.
+class _TypingIndicator extends StatelessWidget {
+  const _TypingIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('typing', style: theme.textTheme.bodyMedium),
+        const SizedBox(width: 6),
+        const _TypingDots(),
+      ],
+    );
+  }
+}
+
+/// Three animated dots for the typing indicator.
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (index) {
+            final phase = (_controller.value - index * 0.15) % 1.0;
+            final t = (1 - (phase * 2 - 1).abs()).clamp(0.0, 1.0);
+            final opacity = (0.3 + 0.7 * t).toDouble();
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Opacity(
+                opacity: opacity,
+                child: const Icon(LucideIcons.circle, size: 6),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }
