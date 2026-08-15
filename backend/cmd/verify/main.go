@@ -35,6 +35,9 @@ func main() {
 		panic(fmt.Sprintf("failed to connect to test db: %v", err))
 	}
 
+	cleanupProviderDatabases(dbURL)
+	defer cleanupProviderDatabases(dbURL)
+
 	cfg := config.Config{
 		HTTPAddr:                ":8093",
 		DatabaseURL:             dbURL,
@@ -1595,4 +1598,25 @@ func testDisruptionAndRecoveryEngine(db *gorm.DB, jwtSecret string) {
 		panic("expected active itinerary version 2 on alias select")
 	}
 }
+
+func cleanupProviderDatabases(coreDBURL string) {
+	for _, dbName := range []string{"hospital_db", "ferry_db", "hotel_db", "transport_db"} {
+		targetURL := strings.Replace(coreDBURL, "/core_db", "/"+dbName, 1)
+		pDB, err := database.Open(targetURL)
+		if err == nil {
+			_ = pDB.Exec("DELETE FROM reservations; DELETE FROM holds; DELETE FROM idempotency_records;").Error
+			if dbName == "hotel_db" {
+				_ = pDB.Exec("DELETE FROM hold_nights;").Error
+			}
+			if dbName == "transport_db" {
+				_ = pDB.Exec("DELETE FROM hold_assignments;").Error
+			}
+			sqlDB, _ := pDB.DB()
+			if sqlDB != nil {
+				_ = sqlDB.Close()
+			}
+		}
+	}
+}
+
 
