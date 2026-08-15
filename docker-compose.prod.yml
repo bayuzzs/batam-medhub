@@ -1,0 +1,216 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-provider_admin}
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-provider_admin_dev_password}
+      CORE_DB_PASSWORD: ${CORE_DB_PASSWORD:-core_dev_password}
+      HOSPITAL_DB_PASSWORD: ${HOSPITAL_DB_PASSWORD:-hospital_dev_password}
+      FERRY_DB_PASSWORD: ${FERRY_DB_PASSWORD:-ferry_dev_password}
+      HOTEL_DB_PASSWORD: ${HOTEL_DB_PASSWORD:-hotel_dev_password}
+      TRANSPORT_DB_PASSWORD: ${TRANSPORT_DB_PASSWORD:-transport_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./providers/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-provider_admin} -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+
+  core-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://core_user:${CORE_DB_PASSWORD:-core_dev_password}@postgres:5432/core_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hospital-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./providers/migrations/hospital:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hospital_user:${HOSPITAL_DB_PASSWORD:-hospital_dev_password}@postgres:5432/hospital_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ferry-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./providers/migrations/ferry:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://ferry_user:${FERRY_DB_PASSWORD:-ferry_dev_password}@postgres:5432/ferry_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hotel-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./providers/migrations/hotel:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hotel_user:${HOTEL_DB_PASSWORD:-hotel_dev_password}@postgres:5432/hotel_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  transport-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./providers/migrations/transport:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://transport_user:${TRANSPORT_DB_PASSWORD:-transport_dev_password}@postgres:5432/transport_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hospital:
+    build:
+      context: ./providers
+      args:
+        SERVICE: hospital
+    environment:
+      DATABASE_URL: postgres://hospital_user:${HOSPITAL_DB_PASSWORD:-hospital_dev_password}@postgres:5432/hospital_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOSPITAL_INTEGRATION_KEY:-hospital_dev_secret}
+    depends_on:
+      hospital-migrate:
+        condition: service_completed_successfully
+    healthcheck: &provider-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  ferry:
+    build:
+      context: ./providers
+      args:
+        SERVICE: ferry
+    environment:
+      DATABASE_URL: postgres://ferry_user:${FERRY_DB_PASSWORD:-ferry_dev_password}@postgres:5432/ferry_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${FERRY_INTEGRATION_KEY:-ferry_dev_secret}
+    depends_on:
+      ferry-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  hotel:
+    build:
+      context: ./providers
+      args:
+        SERVICE: hotel
+    environment:
+      DATABASE_URL: postgres://hotel_user:${HOTEL_DB_PASSWORD:-hotel_dev_password}@postgres:5432/hotel_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOTEL_INTEGRATION_KEY:-hotel_dev_secret}
+    depends_on:
+      hotel-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  transport:
+    build:
+      context: ./providers
+      args:
+        SERVICE: transport
+    environment:
+      DATABASE_URL: postgres://transport_user:${TRANSPORT_DB_PASSWORD:-transport_dev_password}@postgres:5432/transport_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${TRANSPORT_INTEGRATION_KEY:-transport_dev_secret}
+    depends_on:
+      transport-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: postgres://core_user:${CORE_DB_PASSWORD:-core_dev_password}@postgres:5432/core_db?sslmode=disable
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:-12345678901234567890123456789012}
+      JWT_ISSUER: ${JWT_ISSUER:-batam-medhub}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-batam-medhub-mobile}
+      HOSPITAL_BASE_URL: http://hospital:8080
+      HOSPITAL_INTEGRATION_KEY: ${HOSPITAL_INTEGRATION_KEY:-hospital_dev_secret}
+      FERRY_BASE_URL: http://ferry:8080
+      FERRY_INTEGRATION_KEY: ${FERRY_INTEGRATION_KEY:-ferry_dev_secret}
+      HOTEL_BASE_URL: http://hotel:8080
+      HOTEL_INTEGRATION_KEY: ${HOTEL_INTEGRATION_KEY:-hotel_dev_secret}
+      TRANSPORT_BASE_URL: http://transport:8080
+      TRANSPORT_INTEGRATION_KEY: ${TRANSPORT_INTEGRATION_KEY:-transport_dev_secret}
+      PROVIDER_HTTP_TIMEOUT_SECONDS: ${PROVIDER_HTTP_TIMEOUT_SECONDS:-5}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_AI_MODEL: ${CLOUDFLARE_AI_MODEL:-@cf/meta/llama-3.3-70b-instruct-fp8-fast}
+      CLOUDFLARE_AI_BASE_URL: ${CLOUDFLARE_AI_BASE_URL:-https://api.cloudflare.com/client/v4}
+      CLOUDFLARE_AI_TIMEOUT_SECONDS: ${CLOUDFLARE_AI_TIMEOUT_SECONDS:-15}
+      DEMO_SECRET: ${DEMO_SECRET:-demo_dev_secret}
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      hospital:
+        condition: service_healthy
+      ferry:
+        condition: service_healthy
+      hotel:
+        condition: service_healthy
+      transport:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

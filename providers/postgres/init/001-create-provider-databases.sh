@@ -5,6 +5,7 @@ hospital_db_password="${HOSPITAL_DB_PASSWORD:-hospital_dev_password}"
 ferry_db_password="${FERRY_DB_PASSWORD:-ferry_dev_password}"
 hotel_db_password="${HOTEL_DB_PASSWORD:-hotel_dev_password}"
 transport_db_password="${TRANSPORT_DB_PASSWORD:-transport_dev_password}"
+core_db_password="${CORE_DB_PASSWORD:-core_dev_password}"
 
 psql \
   --set=ON_ERROR_STOP=1 \
@@ -12,6 +13,7 @@ psql \
   --set=ferry_db_password="$ferry_db_password" \
   --set=hotel_db_password="$hotel_db_password" \
   --set=transport_db_password="$transport_db_password" \
+  --set=core_db_password="$core_db_password" \
   --username "$POSTGRES_USER" \
   --dbname "${POSTGRES_DB:-postgres}" <<'SQL'
 CREATE ROLE hospital_user
@@ -26,6 +28,9 @@ CREATE ROLE hotel_user
 CREATE ROLE transport_user
   LOGIN PASSWORD :'transport_db_password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE core_user
+  LOGIN PASSWORD :'core_db_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 
 REVOKE ALL PRIVILEGES ON DATABASE postgres FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON DATABASE template1 FROM PUBLIC;
@@ -34,16 +39,19 @@ CREATE DATABASE hospital_db OWNER hospital_user;
 CREATE DATABASE ferry_db OWNER ferry_user;
 CREATE DATABASE hotel_db OWNER hotel_user;
 CREATE DATABASE transport_db OWNER transport_user;
+CREATE DATABASE core_db OWNER core_user;
 
 REVOKE ALL PRIVILEGES ON DATABASE hospital_db FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON DATABASE ferry_db FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON DATABASE hotel_db FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON DATABASE transport_db FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON DATABASE core_db FROM PUBLIC;
 
 GRANT CONNECT, TEMPORARY ON DATABASE hospital_db TO hospital_user;
 GRANT CONNECT, TEMPORARY ON DATABASE ferry_db TO ferry_user;
 GRANT CONNECT, TEMPORARY ON DATABASE hotel_db TO hotel_user;
 GRANT CONNECT, TEMPORARY ON DATABASE transport_db TO transport_user;
+GRANT CONNECT, TEMPORARY ON DATABASE core_db TO core_user;
 
 \connect hospital_db
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC;
@@ -64,4 +72,9 @@ GRANT USAGE, CREATE ON SCHEMA public TO hotel_user;
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC;
 ALTER SCHEMA public OWNER TO transport_user;
 GRANT USAGE, CREATE ON SCHEMA public TO transport_user;
+
+\connect core_db
+REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC;
+ALTER SCHEMA public OWNER TO core_user;
+GRANT USAGE, CREATE ON SCHEMA public TO core_user;
 SQL
