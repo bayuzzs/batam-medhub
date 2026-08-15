@@ -1083,4 +1083,3 @@ func testWorkersAIExtractor(db *gorm.DB, jwtSecret string) {
 		panic("expected seamless deterministic fallback to produce MATCHED planning intent")
 	}
 }
-
