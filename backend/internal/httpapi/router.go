@@ -12,6 +12,10 @@ import (
 	"strconv"
 	"time"
 
+	"batam-medhub/internal/adapter"
+	"batam-medhub/internal/config"
+	"batam-medhub/internal/service"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -56,13 +60,108 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.code }
 
-func New(db *gorm.DB, logger *slog.Logger) *gin.Engine {
+// New constructs and configures the Gin HTTP engine with middleware and routes.
+func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
+	router.HandleMethodNotAllowed = true
+	_ = router.SetTrustedProxies(nil)
+
 	router.Use(requestID(), requestLogger(logger), structuredErrors(), recoverPanics(logger))
+
+	router.NoRoute(func(c *gin.Context) {
+		abort(c, &apiError{
+			status:  http.StatusNotFound,
+			code:    "NOT_FOUND",
+			message: "The requested resource was not found.",
+		})
+	})
+
+	router.NoMethod(func(c *gin.Context) {
+		abort(c, &apiError{
+			status:  http.StatusMethodNotAllowed,
+			code:    "METHOD_NOT_ALLOWED",
+			message: "Method not allowed for this route.",
+		})
+	})
+
 	router.GET("/healthz", liveness)
 	router.GET("/readyz", readiness(db))
+
+	authSvc := service.NewAuthService(db, cfg)
+	profileSvc := service.NewProfileService(db, cfg)
+	catalogSvc := service.NewCatalogService(db)
+	moneySvc := service.NewMoneyService(db)
+	idemSvc := service.NewIdempotencyService(db)
+
+	hospAdapter := adapter.NewHospitalAdapter(cfg.HospitalBaseURL, cfg.HospitalIntegrationKey, cfg.ProviderTimeout)
+	ferryAdapter := adapter.NewFerryAdapter(cfg.FerryBaseURL, cfg.FerryIntegrationKey, cfg.ProviderTimeout)
+	hotelAdapter := adapter.NewHotelAdapter(cfg.HotelBaseURL, cfg.HotelIntegrationKey, cfg.ProviderTimeout)
+	transAdapter := adapter.NewTransportAdapter(cfg.TransportBaseURL, cfg.TransportIntegrationKey, cfg.ProviderTimeout)
+	aggregator := adapter.NewAggregator(hospAdapter, ferryAdapter, hotelAdapter, transAdapter)
+
+	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator)
+	bookingSvc := service.NewBookingSagaService(db, hospAdapter, ferryAdapter, hotelAdapter, transAdapter, moneySvc)
+	journeySvc := service.NewJourneyService(db)
+
+	registerLimiter := newIPRateLimiter(30, time.Minute)
+	loginLimiter := newIPRateLimiter(30, time.Minute)
+	refreshLimiter := newIPRateLimiter(60, time.Minute)
+
+	v1 := router.Group("/v1")
+	{
+		authGroup := v1.Group("/auth")
+		authGroup.Use(noStoreHeader())
+		{
+			authGroup.POST("/register", rateLimitMiddleware(registerLimiter), handleRegister(authSvc))
+			authGroup.POST("/login", rateLimitMiddleware(loginLimiter), handleLogin(authSvc))
+			authGroup.POST("/refresh", rateLimitMiddleware(refreshLimiter), handleRefresh(authSvc))
+			authGroup.POST("/logout", handleLogout(authSvc))
+		}
+
+		profileGroup := v1.Group("/profile")
+		profileGroup.Use(patientBearerAuth(db, cfg))
+		{
+			profileGroup.GET("", handleGetProfile(profileSvc))
+			profileGroup.PATCH("", noStoreHeader(), handleUpdateProfile(profileSvc))
+		}
+
+		catalogGroup := v1.Group("/medical-services")
+		catalogGroup.Use(patientBearerAuth(db, cfg))
+		{
+			catalogGroup.GET("", handleListMedicalServices(catalogSvc))
+		}
+
+		tripGroup := v1.Group("/trip-requests")
+		tripGroup.Use(patientBearerAuth(db, cfg))
+		{
+			tripGroup.POST("", handleCreateTripRequest(tripSvc, idemSvc))
+			tripGroup.GET("/:trip_request_id", handleGetTripRequest(tripSvc))
+			tripGroup.PATCH("/:trip_request_id/intent", handleAmendTripRequestIntent(tripSvc, idemSvc))
+			tripGroup.POST("/:trip_request_id/plans", handleGenerateTripPlans(tripSvc, idemSvc))
+			tripGroup.POST("/:trip_request_id/select-plan", handleSelectPlanForTrip(bookingSvc, tripSvc, idemSvc))
+		}
+
+		planGroup := v1.Group("/plan-options")
+		planGroup.Use(patientBearerAuth(db, cfg))
+		{
+			planGroup.POST("/:plan_option_id/confirm", handleConfirmPlanOption(bookingSvc, idemSvc))
+		}
+
+		journeyGroup := v1.Group("/journeys")
+		journeyGroup.Use(patientBearerAuth(db, cfg))
+		{
+			journeyGroup.GET("", handleListJourneys(journeySvc))
+			journeyGroup.GET("/:journey_id", handleGetJourneyItinerary(journeySvc))
+			journeyGroup.GET("/:journey_id/itinerary", handleGetJourneyItinerary(journeySvc))
+			journeyGroup.GET("/:journey_id/itineraries/:version", handleGetJourneyItineraryVersion(journeySvc))
+		}
+	}
+
 	return router
 }
 

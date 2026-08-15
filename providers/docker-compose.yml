@@ -79,6 +79,7 @@ services:
     environment:
       DATABASE_URL: postgres://hospital_user:${HOSPITAL_DB_PASSWORD:-hospital_dev_password}@postgres:5432/hospital_db?sslmode=disable
       PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOSPITAL_INTEGRATION_KEY:-hospital_dev_secret}
     ports:
       - "8081:8080"
     depends_on:
@@ -100,6 +101,7 @@ services:
     environment:
       DATABASE_URL: postgres://ferry_user:${FERRY_DB_PASSWORD:-ferry_dev_password}@postgres:5432/ferry_db?sslmode=disable
       PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${FERRY_INTEGRATION_KEY:-ferry_dev_secret}
     ports:
       - "8082:8080"
     depends_on:
@@ -116,6 +118,7 @@ services:
     environment:
       DATABASE_URL: postgres://hotel_user:${HOTEL_DB_PASSWORD:-hotel_dev_password}@postgres:5432/hotel_db?sslmode=disable
       PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOTEL_INTEGRATION_KEY:-hotel_dev_secret}
     ports:
       - "8083:8080"
     depends_on:
@@ -132,6 +135,7 @@ services:
     environment:
       DATABASE_URL: postgres://transport_user:${TRANSPORT_DB_PASSWORD:-transport_dev_password}@postgres:5432/transport_db?sslmode=disable
       PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${TRANSPORT_INTEGRATION_KEY:-transport_dev_secret}
     ports:
       - "8084:8080"
     depends_on:
