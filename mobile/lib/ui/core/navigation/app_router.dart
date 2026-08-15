@@ -39,7 +39,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
       final location = state.matchedLocation;
-      final isAuthScreen = location == AppRoutes.onboarding ||
+      final isAuthScreen =
+          location == AppRoutes.onboarding ||
           location == AppRoutes.login ||
           location == AppRoutes.register;
 

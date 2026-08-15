@@ -46,7 +46,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       password: _passwordController.text,
     );
     if (!ok && mounted) {
-      final message = ref.read(authControllerProvider).errorMessage ??
+      final message =
+          ref.read(authControllerProvider).errorMessage ??
           'Unable to log in. Please try again.';
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()

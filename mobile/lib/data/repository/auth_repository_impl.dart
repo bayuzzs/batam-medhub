@@ -7,10 +7,7 @@ import 'auth_repository.dart';
 /// Real [AuthRepository]: calls the core API over [AuthApi] and persists the
 /// session via [TokenStore].
 class AuthRepositoryImpl implements AuthRepository {
-  const AuthRepositoryImpl({
-    required this._api,
-    required this._tokenStore,
-  });
+  const AuthRepositoryImpl({required this._api, required this._tokenStore});
 
   final AuthApi _api;
   final TokenStore _tokenStore;

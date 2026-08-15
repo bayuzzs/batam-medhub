@@ -61,7 +61,9 @@ void main() {
     expect(find.text('Talk with your AI Assistant'), findsOneWidget);
   });
 
-  testWidgets('Register routes to the chat screen', (WidgetTester tester) async {
+  testWidgets('Register routes to the chat screen', (
+    WidgetTester tester,
+  ) async {
     await _pumpApp(tester);
 
     // Onboarding → login → register.
@@ -88,7 +90,9 @@ void main() {
     expect(find.text('Hi, Name'), findsOneWidget);
   });
 
-  testWidgets('Logout returns to the login screen', (WidgetTester tester) async {
+  testWidgets('Logout returns to the login screen', (
+    WidgetTester tester,
+  ) async {
     await _pumpApp(tester);
     await _loginToChat(tester);
 

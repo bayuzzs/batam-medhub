@@ -171,31 +171,30 @@ void main() {
     expect(await container.read(tokenStoreProvider).readSession(), isNull);
   });
 
-  test('login failure surfaces an error message and resets submitting',
-      () async {
-    // A repository that always rejects login.
-    final failing = _FailingRepository();
-    final container = makeContainer(repository: failing);
-    addTearDown(container.dispose);
-    final controller = container.read(authControllerProvider.notifier);
-    await pumpEventQueue();
+  test(
+    'login failure surfaces an error message and resets submitting',
+    () async {
+      // A repository that always rejects login.
+      final failing = _FailingRepository();
+      final container = makeContainer(repository: failing);
+      addTearDown(container.dispose);
+      final controller = container.read(authControllerProvider.notifier);
+      await pumpEventQueue();
 
-    final ok = await controller.login(email: 'a@b.c', password: 'x');
-    expect(ok, isFalse);
+      final ok = await controller.login(email: 'a@b.c', password: 'x');
+      expect(ok, isFalse);
 
-    final state = container.read(authControllerProvider);
-    expect(state.isSubmitting, isFalse);
-    expect(state.errorMessage, isNotNull);
-    expect(state.status, isNot(AuthStatus.authenticated));
-  });
+      final state = container.read(authControllerProvider);
+      expect(state.isSubmitting, isFalse);
+      expect(state.errorMessage, isNotNull);
+      expect(state.status, isNot(AuthStatus.authenticated));
+    },
+  );
 }
 
 class _FailingRepository implements AuthRepository {
   @override
-  Future<AuthSession> login({
-    required String email,
-    required String password,
-  }) {
+  Future<AuthSession> login({required String email, required String password}) {
     throw const AuthException('Invalid credentials');
   }
 

@@ -82,10 +82,7 @@ class FakeAuthRepository implements AuthRepository {
   Future<AuthSession?> restore() =>
       _tokenStore?.readSession() ?? Future.value(null);
 
-  AuthSession _buildSession({
-    required String fullName,
-    required String email,
-  }) {
+  AuthSession _buildSession({required String fullName, required String email}) {
     _counter += 1;
     final now = DateTime.now().toUtc();
     final iat = now.millisecondsSinceEpoch ~/ 1000;

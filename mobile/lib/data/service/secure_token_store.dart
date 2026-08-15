@@ -11,7 +11,7 @@ import 'token_store.dart';
 /// Stores the serialized [AuthSession] under a single key.
 class SecureTokenStore implements TokenStore {
   SecureTokenStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
 
@@ -42,10 +42,7 @@ class SecureTokenStore implements TokenStore {
 
   @override
   Future<void> writeSession(AuthSession session) async {
-    await _storage.write(
-      key: _sessionKey,
-      value: jsonEncode(session.toJson()),
-    );
+    await _storage.write(key: _sessionKey, value: jsonEncode(session.toJson()));
   }
 
   @override

@@ -30,7 +30,8 @@ void main() {
     });
 
     test('returns null when exp is missing or not an integer', () {
-      final noExp = 'eyJhbGciOiJIUzI1NiJ9.'
+      final noExp =
+          'eyJhbGciOiJIUzI1NiJ9.'
           '${base64Url.encode(utf8.encode('{"sub":"p1"}'))}.sig';
       expect(tryDecodeJwtExp(noExp), isNull);
     });

@@ -52,7 +52,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       password: _passwordController.text,
     );
     if (!ok && mounted) {
-      final message = ref.read(authControllerProvider).errorMessage ??
+      final message =
+          ref.read(authControllerProvider).errorMessage ??
           'Unable to register. Please try again.';
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()

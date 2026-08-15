@@ -69,10 +69,7 @@ class ProfilePage extends ConsumerWidget {
                 value: session.profile.preferredCurrency.toUpperCase(),
               ),
             ] else
-              Text(
-                'You are not signed in.',
-                style: theme.textTheme.bodyLarge,
-              ),
+              Text('You are not signed in.', style: theme.textTheme.bodyLarge),
             const Spacer(),
             FilledButton.tonalIcon(
               onPressed: () =>
@@ -118,4 +115,3 @@ class _InfoTile extends StatelessWidget {
     );
   }
 }
-
