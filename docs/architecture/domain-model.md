@@ -1,6 +1,6 @@
 # Batam MedHub Domain Model
 
-Status: contract draft v0.1
+Status: contract draft v0.2
 Scope: first hackathon vertical slice
 
 ## Purpose
@@ -13,6 +13,7 @@ The vertical slice turns a supported planned-care request into a feasible cross-
 
 | Context | Owns | Does not own |
 |---|---|---|
+| Core patient identity | Patient accounts, password verifiers, refresh sessions, access-token claims, and profile currency preference | Email delivery, social identity, medical identity, or provider users |
 | Core orchestration | Supported-service catalog, trip intent, normalized offer snapshots, plan options, booking coordination, journeys, immutable itinerary versions, provider events, disruptions, recovery options, and static FX rates | Live provider inventory or a provider's operational booking state |
 | Hospital provider | Medical-service listings, appointment slots, appointment holds, and confirmed appointments | The patient's cross-provider journey |
 | Ferry provider | Sailings, check-in cutoffs, seat capacity, holds, and confirmed passenger reservations | Transfers, hotel stays, medical appointments, or journey feasibility |
@@ -24,7 +25,7 @@ The core backend and the providers communicate only through HTTP contracts. Ther
 
 ## Deployment-level persistence boundary
 
-- The core backend has its own PostgreSQL datastore.
+- The core backend has its own PostgreSQL datastore, including patient accounts and auth sessions.
 - The four providers share one PostgreSQL server for deployment efficiency.
 - That provider server contains four isolated logical databases: `hospital_db`, `ferry_db`, `hotel_db`, and `transport_db`.
 - Each provider connects with a credential restricted to its database.
@@ -34,6 +35,15 @@ The core backend and the providers communicate only through HTTP contracts. Ther
 Sharing one PostgreSQL process is an infrastructure choice, not a shared domain or transaction boundary.
 
 ## Core aggregates and entities
+
+### Patient identity and sessions
+
+| Entity | Meaning | Important identity or rule |
+|---|---|---|
+| `Patient` | A backend-owned account used by the mobile application. | Stable patient ID; normalized email is unique; only a bcrypt verifier is persisted, never a plaintext password. |
+| `AuthSession` | One refreshable patient login session. | Stores a SHA-256 refresh-token hash, expiry, revocation, and replacement link. Its stable session ID is the JWT `sid` claim. |
+
+Access JWTs are short-lived HS256 tokens signed with a dedicated secret. Required claims are `iss`, `aud`, `sub`, `sid`, `preferred_currency`, `iat`, and `exp`. `sub` is the patient ID, not the email. Middleware accepts only the configured algorithm, issuer, and audience, verifies that `sid` is still active, and rejects a currency claim that differs from the persisted patient profile. Refresh tokens are random opaque credentials, are rotated atomically, and are never stored in plaintext. Passwords and tokens must be redacted from logs and token responses use `Cache-Control: no-store`.
 
 ### Reference and integration data
 
@@ -51,7 +61,7 @@ Sharing one PostgreSQL process is an infrastructure choice, not a shared domain 
 
 | Entity | Meaning | Important identity or rule |
 |---|---|---|
-| `TripRequest` | A patient's planning request and validated structured intent. | Owned by the JWT subject. The first slice does not need a patient table. |
+| `TripRequest` | A patient's planning request and validated structured intent. | Owned by `patient_id`; the JWT `sub` must equal that stable patient ID. |
 | `PlanOption` | One feasible, explainable combination returned for a trip request. | At most two active options per planning run. It has an expiry derived from its provider offers. |
 | `PlanItem` | An immutable normalized snapshot of one provider offer or required non-bookable itinerary step within a plan. | Stores provider and external offer references, time window, source money, synthetic/source markers, and expiry. It is not live inventory. |
 
@@ -89,7 +99,7 @@ The actor data in a provider event is an audit snapshot asserted by the provider
 
 | Entity | Meaning | Important identity or rule |
 |---|---|---|
-| `IdempotencyRecord` | Stores the outcome of a mutating core request so retries return the original result. | Unique by authenticated scope, operation, and idempotency key. |
+| `IdempotencyRecord` | Stores the outcome of an orchestration mutation so retries return the original result. | Unique by authenticated scope, operation, and idempotency key. Auth operations use database uniqueness, atomic rotation, and idempotent logout semantics instead of persisting plaintext token responses. |
 
 The stored request fingerprint must match on a retry. Reusing a key with a different request is a conflict.
 
@@ -120,6 +130,7 @@ Search availability is derived inside the provider transaction from inventory mi
 | Value object | Contract rule |
 |---|---|
 | `Money` | Integer `amount_minor` plus ISO 4217 `currency`; never floating point. |
+| `ReferenceCurrency` | Patient-facing display currency supported by the static demo FX table; initially `SGD` or `IDR`. |
 | `ConvertedMoney` | Source money plus reference/display money, rate, rate source, and rate effective timestamp; explicitly marked estimated/reference. |
 | `TimeWindow` | UTC `starts_at` and `ends_at`, plus `start_time_zone` and `end_time_zone` IANA names for local display. End must be after start. |
 | `ExternalReference` | Provider ID plus opaque provider-owned external ID. Core must not parse meaning from it. |
@@ -134,7 +145,7 @@ Search availability is derived inside the provider transaction from inventory mi
 4. A planning or recovery run returns no more than two feasible options.
 5. A `PlanItem` or `ItineraryItem` is a snapshot; it must not be treated as current provider availability.
 6. Every provider offer is revalidated before hold or confirmation.
-7. All mutating core and provider operations are idempotent within an authenticated scope.
+7. Contracted orchestration and provider mutations are idempotent within an authenticated scope. Auth mutations instead use unique normalized email, single-use refresh rotation, and idempotent logout so token responses are not stored in generic idempotency records.
 8. A journey becomes `ACTIVE` only after every required provider reservation is confirmed.
 9. Confirmation failure releases all new holds that can be safely released. Confirmed cleanup sets the trip request to `CONFIRMATION_FAILED`; an uncertain compensation sets it to `MANUAL_REVIEW`, retains every external reference, and creates no active journey.
 10. An itinerary version is immutable after activation. Recovery creates a new version; it never edits the old one.
@@ -148,6 +159,11 @@ Search availability is derived inside the provider transaction from inventory mi
 18. Store instants in UTC and retain IANA time zones. Store original provider money and any display conversion snapshot.
 19. All demo provider, patient, inventory, price, and booking data is synthetic and visibly marked `synthetic: true` with source `MOCK`.
 20. Active and superseded itinerary versions remain retrievable with their full immutable item contents.
+21. Email is trimmed, normalized to lowercase, and uniquely indexed before account creation or lookup.
+22. Password plaintext is never persisted or logged. The backend enforces 8–72 UTF-8 bytes before bcrypt hashing.
+23. Refresh rotation revokes the presented session and creates its replacement atomically; concurrent reuse has at most one successful request.
+24. Logout revokes the identified session, and bearer middleware rejects access tokens whose `sid` is expired, revoked, or unknown.
+25. Updating a profile requires the access JWT and current refresh token to identify the same active session. The backend then persists the profile and rotates that session before returning a replacement token pair; a stolen access token alone cannot mint a refresh credential. Bearer middleware rejects currency claims that differ from the persisted profile, so other active sessions must refresh before further API use.
 
 ## Transaction boundaries
 
@@ -158,4 +174,4 @@ Search availability is derived inside the provider transaction from inventory mi
 
 ## Explicit exclusions
 
-The first vertical slice has no medical records, diagnosis, treatment selection, emergency triage, payment, refund, insurance, live currency feed, provider dashboard, provider-user authentication, multilingual clinical translation, or real provider integration.
+The first vertical slice has no medical records, diagnosis, treatment selection, emergency triage, payment, refund, insurance, live currency feed, provider dashboard, provider-user authentication, password recovery, email verification, MFA, social login, multilingual clinical translation, or real provider integration.

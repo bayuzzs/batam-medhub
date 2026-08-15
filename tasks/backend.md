@@ -17,6 +17,8 @@ Write only inside `backend/**`. Do not modify mobile, providers, shared specific
 - Store UUIDs or another contract-compatible opaque identifier consistently.
 - Store money as integer minor units using the currency's ISO 4217 exponent plus its currency code.
 - Store instants in UTC and retain source IANA time zones where local schedule meaning matters.
+- Sign access JWTs with a dedicated HS256 secret of at least 32 random bytes; never reuse provider, demo, or Workers AI secrets.
+- Persist only bcrypt password verifiers and SHA-256 refresh-token hashes; redact credentials from logs and disable caching on token responses.
 - Validate all Workers AI output as untrusted input.
 - Use provider-specific HTTP adapters; never query provider databases.
 - Use synchronous orchestration for the hackathon; do not add a message broker or distributed-saga framework.
@@ -38,6 +40,7 @@ Done when the service builds, starts with configuration, and reports health with
 
 Create ordered SQL migrations for:
 
+- patients and auth sessions;
 - providers and provider-key hashes;
 - medical services and provider capability mappings;
 - static FX rates;
@@ -47,13 +50,23 @@ Create ordered SQL migrations for:
 - provider events, disruptions, and recovery options;
 - idempotency records where required by the contract.
 
-Add deterministic synthetic seeds for MCU Basic, MCU Comprehensive, Dental Check-up, Eye Screening, the provider registry, and static FX rates.
+Add deterministic synthetic seeds for MCU Basic, MCU Comprehensive, Dental Check-up, Eye Screening, the provider registry, and static FX rates. The demo creates its patient through the contracted register operation rather than a seeded password verifier.
 
 Done when migrations apply cleanly to an empty database and GORM models match them without AutoMigrate.
 
 ### B3 — Trust-boundary primitives
 
-- Implement patient JWT verification and read the preferred-currency claim.
+- Implement patient register, login, refresh-token rotation, idempotent logout, and `GET/PATCH /v1/profile` exactly as contracted.
+- Normalize emails with trim plus lowercase and enforce uniqueness in PostgreSQL.
+- Enforce password length before bcrypt hashing; never log password or token values.
+- When a login email is unknown, compare against a fixed dummy bcrypt verifier so invalid-email and wrong-password paths have similar work and the same response.
+- Generate high-entropy opaque refresh tokens, persist only SHA-256 hashes, and rotate sessions atomically with row locking so concurrent reuse has at most one success.
+- Issue 15-minute HS256 access JWTs with validated `iss`, `aud`, `sub`, `sid`, `preferred_currency`, `iat`, and `exp` claims.
+- Verify that JWT `sid` still references an active unexpired session, so logout immediately revokes bearer access.
+- Reject bearer access when JWT `preferred_currency` differs from the persisted patient profile; another active session regains access by refreshing and receiving the current claim.
+- Apply bounded process-local rate limits to register, login, and refresh and emit contracted `429` responses; no distributed limiter is needed for the demo.
+- Return generic invalid-credential errors and `Cache-Control: no-store` on every credential response.
+- On profile update, require that the body refresh-token hash belongs to the access JWT `sid`; only then persist `SGD` or `IDR`, rotate the session, and return a replacement token pair.
 - Implement provider-secret verification using stored hashes.
 - Implement request validation, common errors, and idempotency behavior.
 - Implement source-money preservation and static reference-currency conversion.
@@ -119,8 +132,9 @@ Done when migrations apply cleanly to an empty database and GORM models match th
 ### B10 — Demo hardening
 
 - Implement the contracted deterministic demo reset behavior.
+- Revoke sessions and remove synthetic patients during demo reset so the golden registration can be replayed; never enable this behavior in a non-demo deployment.
 - Add an English backend README and environment example inside `backend/`.
-- Document exact migration, startup, health, happy-path, and disruption smoke commands.
+- Document exact migration, startup, auth/session, health, happy-path, and disruption smoke commands.
 
 ## Explicitly out of scope
 
