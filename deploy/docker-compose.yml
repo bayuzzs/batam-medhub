@@ -1,0 +1,257 @@
+# ==============================================================================
+# Batam MedHub — Production Docker Compose
+#
+# One command brings up the ENTIRE stack:
+#   PostgreSQL 17 (5 databases) + core backend API + all 4 provider services.
+#
+# Differences from the dev stack (providers/docker-compose.yml):
+#   - Single compose file for backend AND all providers.
+#   - PostgreSQL and the provider services are NOT published to the host;
+#     only the backend API is reachable on 127.0.0.1:8080 (host nginx reverse
+#     proxy terminates HTTPS and forwards to it).
+#   - All secrets come from deploy/.env (see .env.example).
+#
+# Usage (run from this directory):
+#   cp .env.example .env   # then edit .env
+#   docker compose up -d --build
+# ==============================================================================
+
+name: batam-medhub
+
+networks:
+  medhub-net:
+    driver: bridge
+
+volumes:
+  medhub-postgres-data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 17 — hosts core_db + the four provider databases
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: provider_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${PROVIDER_POSTGRES_PASSWORD:?set PROVIDER_POSTGRES_PASSWORD in .env}
+      HOSPITAL_DB_PASSWORD: ${HOSPITAL_DB_PASSWORD:?set HOSPITAL_DB_PASSWORD in .env}
+      FERRY_DB_PASSWORD: ${FERRY_DB_PASSWORD:?set FERRY_DB_PASSWORD in .env}
+      HOTEL_DB_PASSWORD: ${HOTEL_DB_PASSWORD:?set HOTEL_DB_PASSWORD in .env}
+      TRANSPORT_DB_PASSWORD: ${TRANSPORT_DB_PASSWORD:?set TRANSPORT_DB_PASSWORD in .env}
+    volumes:
+      - medhub-postgres-data:/var/lib/postgresql/data
+      # Creates the four provider databases/roles on first boot.
+      - ../providers/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U provider_admin -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+    # NOTE: not published to the host for production. Uncomment only for
+    # debugging:  - "5432:5432"
+
+  # ---------------------------------------------------------------------------
+  # Core database bootstrap (one-shot)
+  # ---------------------------------------------------------------------------
+  core-db-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${PROVIDER_POSTGRES_PASSWORD:?set PROVIDER_POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./postgres/core-db-init.sh:/init-core-db.sh:ro
+    entrypoint: ["sh", "/init-core-db.sh"]
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Provider database migrations (one-shot, golang-migrate)
+  # ---------------------------------------------------------------------------
+  hospital-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ../providers/migrations/hospital:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hospital_user:${HOSPITAL_DB_PASSWORD:?set HOSPITAL_DB_PASSWORD in .env}@postgres:5432/hospital_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ferry-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ../providers/migrations/ferry:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://ferry_user:${FERRY_DB_PASSWORD:?set FERRY_DB_PASSWORD in .env}@postgres:5432/ferry_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hotel-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ../providers/migrations/hotel:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hotel_user:${HOTEL_DB_PASSWORD:?set HOTEL_DB_PASSWORD in .env}@postgres:5432/hotel_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  transport-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ../providers/migrations/transport:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://transport_user:${TRANSPORT_DB_PASSWORD:?set TRANSPORT_DB_PASSWORD in .env}@postgres:5432/transport_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Provider services (internal network only)
+  # ---------------------------------------------------------------------------
+  hospital:
+    build:
+      context: ../providers
+      args:
+        SERVICE: hospital
+    image: batam-medhub/provider-hospital:latest
+    environment:
+      DATABASE_URL: postgres://hospital_user:${HOSPITAL_DB_PASSWORD:?set HOSPITAL_DB_PASSWORD in .env}@postgres:5432/hospital_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOSPITAL_INTEGRATION_KEY:?set HOSPITAL_INTEGRATION_KEY in .env}
+    depends_on:
+      hospital-migrate:
+        condition: service_completed_successfully
+    healthcheck: &provider-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  ferry:
+    build:
+      context: ../providers
+      args:
+        SERVICE: ferry
+    image: batam-medhub/provider-ferry:latest
+    environment:
+      DATABASE_URL: postgres://ferry_user:${FERRY_DB_PASSWORD:?set FERRY_DB_PASSWORD in .env}@postgres:5432/ferry_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${FERRY_INTEGRATION_KEY:?set FERRY_INTEGRATION_KEY in .env}
+    depends_on:
+      ferry-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  hotel:
+    build:
+      context: ../providers
+      args:
+        SERVICE: hotel
+    image: batam-medhub/provider-hotel:latest
+    environment:
+      DATABASE_URL: postgres://hotel_user:${HOTEL_DB_PASSWORD:?set HOTEL_DB_PASSWORD in .env}@postgres:5432/hotel_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${HOTEL_INTEGRATION_KEY:?set HOTEL_INTEGRATION_KEY in .env}
+    depends_on:
+      hotel-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  transport:
+    build:
+      context: ../providers
+      args:
+        SERVICE: transport
+    image: batam-medhub/provider-transport:latest
+    environment:
+      DATABASE_URL: postgres://transport_user:${TRANSPORT_DB_PASSWORD:?set TRANSPORT_DB_PASSWORD in .env}@postgres:5432/transport_db?sslmode=disable
+      PORT: "8080"
+      PROVIDER_INTEGRATION_KEY: ${TRANSPORT_INTEGRATION_KEY:?set TRANSPORT_INTEGRATION_KEY in .env}
+    depends_on:
+      transport-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Core backend — migration + API
+  # ---------------------------------------------------------------------------
+  backend-migrate:
+    image: batam-medhub/backend:latest
+    build:
+      context: ../backend
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://provider_admin:${PROVIDER_POSTGRES_PASSWORD:?set PROVIDER_POSTGRES_PASSWORD in .env}@postgres:5432/core_db?sslmode=disable
+    depends_on:
+      core-db-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  backend:
+    image: batam-medhub/backend:latest
+    build:
+      context: ../backend
+    command: ["api"]
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: postgres://provider_admin:${PROVIDER_POSTGRES_PASSWORD:?set PROVIDER_POSTGRES_PASSWORD in .env}@postgres:5432/core_db?sslmode=disable
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:?set JWT_SIGNING_SECRET in .env}
+      JWT_ISSUER: batam-medhub
+      JWT_AUDIENCE: batam-medhub-mobile
+      HOSPITAL_BASE_URL: http://hospital:8080
+      HOSPITAL_INTEGRATION_KEY: ${HOSPITAL_INTEGRATION_KEY:?set HOSPITAL_INTEGRATION_KEY in .env}
+      FERRY_BASE_URL: http://ferry:8080
+      FERRY_INTEGRATION_KEY: ${FERRY_INTEGRATION_KEY:?set FERRY_INTEGRATION_KEY in .env}
+      HOTEL_BASE_URL: http://hotel:8080
+      HOTEL_INTEGRATION_KEY: ${HOTEL_INTEGRATION_KEY:?set HOTEL_INTEGRATION_KEY in .env}
+      TRANSPORT_BASE_URL: http://transport:8080
+      TRANSPORT_INTEGRATION_KEY: ${TRANSPORT_INTEGRATION_KEY:?set TRANSPORT_INTEGRATION_KEY in .env}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:?set CLOUDFLARE_ACCOUNT_ID in .env}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN in .env}
+      CLOUDFLARE_AI_MODEL: ${CLOUDFLARE_AI_MODEL:-@cf/meta/llama-3.3-70b-instruct-fp8-fast}
+      CLOUDFLARE_AI_BASE_URL: ${CLOUDFLARE_AI_BASE_URL:-https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1}
+      DEMO_SECRET: ${DEMO_SECRET:?set DEMO_SECRET in .env}
+    ports:
+      # Only reachable on the host loopback; nginx terminates HTTPS and proxies here.
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+      hospital:
+        condition: service_started
+      ferry:
+        condition: service_started
+      hotel:
+        condition: service_started
+      transport:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
