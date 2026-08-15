@@ -1,0 +1,144 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: provider_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${PROVIDER_POSTGRES_PASSWORD:-provider_admin_dev_password}
+      HOSPITAL_DB_PASSWORD: ${HOSPITAL_DB_PASSWORD:-hospital_dev_password}
+      FERRY_DB_PASSWORD: ${FERRY_DB_PASSWORD:-ferry_dev_password}
+      HOTEL_DB_PASSWORD: ${HOTEL_DB_PASSWORD:-hotel_dev_password}
+      TRANSPORT_DB_PASSWORD: ${TRANSPORT_DB_PASSWORD:-transport_dev_password}
+    volumes:
+      - provider-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U provider_admin -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  hospital-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./migrations/hospital:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hospital_user:${HOSPITAL_DB_PASSWORD:-hospital_dev_password}@postgres:5432/hospital_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ferry-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./migrations/ferry:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://ferry_user:${FERRY_DB_PASSWORD:-ferry_dev_password}@postgres:5432/ferry_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hotel-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./migrations/hotel:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://hotel_user:${HOTEL_DB_PASSWORD:-hotel_dev_password}@postgres:5432/hotel_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  transport-migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./migrations/transport:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://transport_user:${TRANSPORT_DB_PASSWORD:-transport_dev_password}@postgres:5432/transport_db?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hospital:
+    build:
+      context: .
+      args:
+        SERVICE: hospital
+    environment:
+      DATABASE_URL: postgres://hospital_user:${HOSPITAL_DB_PASSWORD:-hospital_dev_password}@postgres:5432/hospital_db?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8081:8080"
+    depends_on:
+      hospital-migrate:
+        condition: service_completed_successfully
+    healthcheck: &provider-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  ferry:
+    build:
+      context: .
+      args:
+        SERVICE: ferry
+    environment:
+      DATABASE_URL: postgres://ferry_user:${FERRY_DB_PASSWORD:-ferry_dev_password}@postgres:5432/ferry_db?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8082:8080"
+    depends_on:
+      ferry-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  hotel:
+    build:
+      context: .
+      args:
+        SERVICE: hotel
+    environment:
+      DATABASE_URL: postgres://hotel_user:${HOTEL_DB_PASSWORD:-hotel_dev_password}@postgres:5432/hotel_db?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8083:8080"
+    depends_on:
+      hotel-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+  transport:
+    build:
+      context: .
+      args:
+        SERVICE: transport
+    environment:
+      DATABASE_URL: postgres://transport_user:${TRANSPORT_DB_PASSWORD:-transport_dev_password}@postgres:5432/transport_db?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8084:8080"
+    depends_on:
+      transport-migrate:
+        condition: service_completed_successfully
+    healthcheck: *provider-healthcheck
+    restart: unless-stopped
+
+volumes:
+  provider-postgres-data:
