@@ -1,492 +1,520 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
+	"net/http/httptest"
 	"time"
+
+	"batam-medhub/internal/adapter"
 )
 
-const baseURL = "http://localhost:8092"
-
 func main() {
-	fmt.Println("=== Starting B4 Verification Suite ===")
+	fmt.Println("=== Starting B5 Provider Adapters Verification Suite ===")
 
-	nonce := time.Now().UnixNano()
-	// 1. Register Patient 1
-	p1Token := registerPatient(fmt.Sprintf("patient1_%d@example.test", nonce), "Patient One", "Passw0rd123!")
-	fmt.Println("[PASS] Patient 1 registered and authenticated.")
+	ctx := context.Background()
 
-	// 2. Register Patient 2
-	p2Token := registerPatient(fmt.Sprintf("patient2_%d@example.test", nonce), "Patient Two", "Passw0rd123!")
-	fmt.Println("[PASS] Patient 2 registered and authenticated.")
+	// 1. Setup Mock Provider Servers
+	hospitalServer := startMockProviderServer(adapter.ProviderTypeHospital, "hospital-demo-01", "hospital_dev_secret")
+	defer hospitalServer.Close()
 
-	// 3. Header & Input Validations
-	testHeaderAndInputValidations(p1Token)
-	fmt.Println("[PASS] Idempotency header and request validation checks passed.")
+	ferryServer := startMockProviderServer(adapter.ProviderTypeFerry, "ferry-demo-01", "ferry_dev_secret")
+	defer ferryServer.Close()
 
-	// 4. Test Structured Intent Resolutions
-	tripMatchedID := testMatchedTripRequest(p1Token)
-	tripClarifyID := testNeedsClarificationTripRequest(p1Token)
-	tripUnsupportedID := testUnsupportedTripRequest(p1Token)
-	_ = testOutOfScopeTripRequest(p1Token)
-	fmt.Println("[PASS] All 4 intent resolutions (MATCHED, NEEDS_CLARIFICATION, UNSUPPORTED_SERVICE, OUT_OF_SCOPE) validated.")
+	hotelServer := startMockProviderServer(adapter.ProviderTypeHotel, "hotel-demo-01", "hotel_dev_secret")
+	defer hotelServer.Close()
 
-	// 5. Test Idempotency Replay & Conflict
-	testIdempotency(p1Token)
-	fmt.Println("[PASS] Idempotency replay and 409 conflict detection validated.")
+	transportServer := startMockProviderServer(adapter.ProviderTypeTransport, "transport-demo-01", "transport_dev_secret")
+	defer transportServer.Close()
 
-	// 6. Test GET /v1/trip-requests/{id} & Patient Scoping
-	testGetTripRequest(p1Token, p2Token, tripMatchedID)
-	fmt.Println("[PASS] GET trip-request and patient ID scoping (404 on cross-patient access) validated.")
+	// 2. Initialize Adapters
+	hospAdapter := adapter.NewHospitalAdapter(hospitalServer.URL, "hospital_dev_secret", 2*time.Second)
+	ferryAdapter := adapter.NewFerryAdapter(ferryServer.URL, "ferry_dev_secret", 2*time.Second)
+	hotelAdapter := adapter.NewHotelAdapter(hotelServer.URL, "hotel_dev_secret", 2*time.Second)
+	transAdapter := adapter.NewTransportAdapter(transportServer.URL, "transport_dev_secret", 2*time.Second)
 
-	// 7. Test PATCH /v1/trip-requests/{id}/intent
-	testAmendIntent(p1Token, p2Token, tripClarifyID)
-	fmt.Println("[PASS] PATCH intent clarification resolution to MATCHED validated.")
+	// 3. Test Hospital Adapter Lifecycle & Error Handling
+	testHospitalAdapter(ctx, hospAdapter, hospitalServer.URL)
+	fmt.Println("[PASS] HospitalAdapter search, hold, confirm, get, release, and error mappings validated.")
 
-	// 8. Test POST /v1/trip-requests/{id}/plans
-	testPlanning(p1Token, p2Token, tripMatchedID, tripUnsupportedID)
-	fmt.Println("[PASS] POST plans generation, pricing conversion, and cross-provider options validated.")
+	// 4. Test Ferry Adapter Lifecycle
+	testFerryAdapter(ctx, ferryAdapter)
+	fmt.Println("[PASS] FerryAdapter search, hold, confirm, get, and release validated.")
 
-	fmt.Println("\n=== ALL B4 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
+	// 5. Test Hotel Adapter Lifecycle
+	testHotelAdapter(ctx, hotelAdapter)
+	fmt.Println("[PASS] HotelAdapter search, hold, confirm, get, and release validated.")
+
+	// 6. Test Transport Adapter Lifecycle with Booking Requirements
+	testTransportAdapter(ctx, transAdapter)
+	fmt.Println("[PASS] TransportAdapter search, hold with booking requirements, confirm, get, and release validated.")
+
+	// 7. Test Concurrent Aggregator with Partial Failure Isolation
+	testAggregator(ctx, hospAdapter, ferryAdapter, hotelAdapter, transAdapter)
+	fmt.Println("[PASS] Multi-provider Aggregator concurrent execution and fault isolation validated.")
+
+	fmt.Println("\n=== ALL B5 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
 }
 
-func registerPatient(email, name, password string) string {
-	payload := map[string]any{
-		"email":              email,
-		"full_name":          name,
-		"password":           password,
-		"preferred_currency": "SGD",
-	}
-	body, _ := json.Marshal(payload)
-	resp, err := http.Post(baseURL+"/v1/auth/register", "application/json", bytes.NewReader(body))
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		raw, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("register failed status %d: %s", resp.StatusCode, string(raw)))
+func testHospitalAdapter(ctx context.Context, a *adapter.HospitalAdapter, baseURL string) {
+	// Health
+	health, err := a.Health(ctx, "req-hosp-health")
+	if err != nil || health.Status != "UP" {
+		panic(fmt.Sprintf("health check failed: %v", err))
 	}
 
-	var session struct {
-		AccessToken string `json:"access_token"`
+	// Search
+	offers, err := a.Search(ctx, "req-hosp-search", adapter.HospitalSearchCriteria{
+		ServiceCode:  "MCU_BASIC",
+		PatientCount: 1,
+		AppointmentWindow: adapter.TimeWindow{
+			StartsAt:      "2026-08-22T02:00:00Z",
+			EndsAt:        "2026-08-22T08:00:00Z",
+			StartTimeZone: "Asia/Jakarta",
+			EndTimeZone:   "Asia/Jakarta",
+		},
+	})
+	if err != nil || len(offers) == 0 {
+		panic(fmt.Sprintf("search failed: %v", err))
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&session)
-	return session.AccessToken
-}
-
-func testHeaderAndInputValidations(token string) {
-	// Missing Idempotency-Key
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader([]byte(`{"prompt":"hello test prompt","locale":"en"}`)))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusBadRequest {
-		panic(fmt.Sprintf("expected 400 for missing Idempotency-Key, got %d", resp.StatusCode))
-	}
-	resp.Body.Close()
-
-	// Short Idempotency-Key (< 8 chars)
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader([]byte(`{"prompt":"hello test prompt","locale":"en"}`)))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "short")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusBadRequest {
-		panic(fmt.Sprintf("expected 400 for short Idempotency-Key, got %d", resp.StatusCode))
-	}
-	resp.Body.Close()
-
-	// Invalid locale
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader([]byte(`{"prompt":"hello test prompt","locale":"fr"}`)))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-test-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusBadRequest {
-		panic(fmt.Sprintf("expected 400 for invalid locale, got %d", resp.StatusCode))
-	}
-	resp.Body.Close()
-}
-
-func testMatchedTripRequest(token string) string {
-	prompt := "I need a same-day basic medical check-up in Batam on 22 August, leaving from HarbourFront with my spouse, with a budget of SGD 400."
-	payload := map[string]any{"prompt": prompt, "locale": "en"}
-	body, _ := json.Marshal(payload)
-
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-matched-001")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		raw, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("expected 201 for matched trip, got %d: %s", resp.StatusCode, string(raw)))
+	if offers[0].OfferID != "hosp-offer-001" {
+		panic(fmt.Sprintf("expected offer_id hosp-offer-001, got %s", offers[0].OfferID))
 	}
 
-	loc := resp.Header.Get("Location")
-	if loc == "" {
-		panic("missing Location header on 201 response")
+	// Create Hold
+	hold, err := a.CreateHold(ctx, "req-hosp-hold", "idem-hosp-hold-01", adapter.CreateHoldRequest{
+		ProviderID:        "hospital-demo-01",
+		OfferID:           "hosp-offer-001",
+		Units:             1,
+		ExpectedUnitPrice: adapter.Money{AmountMinor: 150000000, Currency: "IDR"},
+		ClientReference:   "journey-001-hosp",
+	})
+	if err != nil || hold.HoldID != "hosp-hold-001" {
+		panic(fmt.Sprintf("create hold failed: %v", err))
 	}
 
-	var detail struct {
-		TripRequest struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Intent struct {
-				Resolution   string `json:"resolution"`
-				ServiceCode  string `json:"service_code"`
-				PatientCount int    `json:"patient_count"`
-			} `json:"intent"`
-		} `json:"trip_request"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&detail)
-
-	if detail.TripRequest.Intent.Resolution != "MATCHED" {
-		panic(fmt.Sprintf("expected MATCHED, got %s", detail.TripRequest.Intent.Resolution))
-	}
-	if detail.TripRequest.Status != "PLANNING" {
-		panic(fmt.Sprintf("expected PLANNING status, got %s", detail.TripRequest.Status))
-	}
-	if detail.TripRequest.Intent.ServiceCode != "MCU_BASIC" {
-		panic(fmt.Sprintf("expected MCU_BASIC, got %s", detail.TripRequest.Intent.ServiceCode))
+	// Confirm Hold
+	res, err := a.ConfirmHold(ctx, "req-hosp-confirm", "idem-hosp-conf-01", hold.HoldID)
+	if err != nil || res.ReservationID != "hosp-res-001" {
+		panic(fmt.Sprintf("confirm hold failed: %v", err))
 	}
 
-	return detail.TripRequest.ID
-}
-
-func testNeedsClarificationTripRequest(token string) string {
-	prompt := "I need a medical check-up in Batam"
-	payload := map[string]any{"prompt": prompt, "locale": "en"}
-	body, _ := json.Marshal(payload)
-
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-clarify-001")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		raw, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("expected 201 for clarify trip, got %d: %s", resp.StatusCode, string(raw)))
+	// Get Reservation
+	getRes, err := a.GetReservation(ctx, "req-hosp-get", res.ReservationID)
+	if err != nil || getRes.Status != "CONFIRMED" {
+		panic(fmt.Sprintf("get reservation failed: %v", err))
 	}
 
-	var detail struct {
-		TripRequest struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Intent struct {
-				Resolution    string   `json:"resolution"`
-				MissingFields []string `json:"missing_fields"`
-			} `json:"intent"`
-		} `json:"trip_request"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&detail)
-
-	if detail.TripRequest.Intent.Resolution != "NEEDS_CLARIFICATION" {
-		panic(fmt.Sprintf("expected NEEDS_CLARIFICATION, got %s", detail.TripRequest.Intent.Resolution))
-	}
-	if detail.TripRequest.Status != "NEEDS_INPUT" {
-		panic(fmt.Sprintf("expected NEEDS_INPUT status, got %s", detail.TripRequest.Status))
-	}
-	if len(detail.TripRequest.Intent.MissingFields) == 0 {
-		panic("expected missing_fields to be non-empty")
+	// Release Reservation
+	relRes, err := a.ReleaseReservation(ctx, "req-hosp-rel-res", "idem-hosp-rel-01", res.ReservationID)
+	if err != nil || relRes.Status != "RELEASED" {
+		panic(fmt.Sprintf("release reservation failed: %v", err))
 	}
 
-	return detail.TripRequest.ID
-}
-
-func testUnsupportedTripRequest(token string) string {
-	prompt := "I need knee replacement surgery in Batam on 22 August"
-	payload := map[string]any{"prompt": prompt, "locale": "en"}
-	body, _ := json.Marshal(payload)
-
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-unsupported-001")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	var detail struct {
-		TripRequest struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Intent struct {
-				Resolution        string  `json:"resolution"`
-				UnsupportedReason *string `json:"unsupported_reason"`
-			} `json:"intent"`
-		} `json:"trip_request"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&detail)
-
-	if detail.TripRequest.Intent.Resolution != "UNSUPPORTED_SERVICE" {
-		panic(fmt.Sprintf("expected UNSUPPORTED_SERVICE, got %s", detail.TripRequest.Intent.Resolution))
-	}
-	if detail.TripRequest.Status != "UNSUPPORTED_SERVICE" {
-		panic(fmt.Sprintf("expected UNSUPPORTED_SERVICE status, got %s", detail.TripRequest.Status))
-	}
-	if detail.TripRequest.Intent.UnsupportedReason == nil {
-		panic("expected unsupported_reason to be present")
+	// Test Error Mapping: Invalid Secret (401)
+	badAuthAdapter := adapter.NewHospitalAdapter(baseURL, "wrong_secret", 2*time.Second)
+	_, err = badAuthAdapter.Search(ctx, "req-bad-auth", adapter.HospitalSearchCriteria{
+		ServiceCode:  "MCU_BASIC",
+		PatientCount: 1,
+		AppointmentWindow: adapter.TimeWindow{
+			StartsAt:      "2026-08-22T02:00:00Z",
+			EndsAt:        "2026-08-22T08:00:00Z",
+			StartTimeZone: "Asia/Jakarta",
+			EndTimeZone:   "Asia/Jakarta",
+		},
+	})
+	var provErr *adapter.ProviderError
+	if !errors.As(err, &provErr) || !provErr.IsUnauthorized() {
+		panic(fmt.Sprintf("expected 401 ProviderError on bad auth, got: %v", err))
 	}
 
-	return detail.TripRequest.ID
-}
-
-func testOutOfScopeTripRequest(token string) string {
-	prompt := "I have severe chest pain and need emergency help now"
-	payload := map[string]any{"prompt": prompt, "locale": "en"}
-	body, _ := json.Marshal(payload)
-
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-outofscope-001")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	var detail struct {
-		TripRequest struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Intent struct {
-				Resolution       string  `json:"resolution"`
-				OutOfScopeReason *string `json:"out_of_scope_reason"`
-			} `json:"intent"`
-		} `json:"trip_request"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&detail)
-
-	if detail.TripRequest.Intent.Resolution != "OUT_OF_SCOPE" {
-		panic(fmt.Sprintf("expected OUT_OF_SCOPE, got %s", detail.TripRequest.Intent.Resolution))
-	}
-	if detail.TripRequest.Status != "OUT_OF_SCOPE" {
-		panic(fmt.Sprintf("expected OUT_OF_SCOPE status, got %s", detail.TripRequest.Status))
-	}
-	if detail.TripRequest.Intent.OutOfScopeReason == nil {
-		panic("expected out_of_scope_reason to be present")
+	// Test Error Mapping: Not Found (404)
+	_, err = a.GetReservation(ctx, "req-not-found", "unknown-res-id")
+	if !errors.As(err, &provErr) || !provErr.IsNotFound() {
+		panic(fmt.Sprintf("expected 404 ProviderError on missing resource, got: %v", err))
 	}
 
-	return detail.TripRequest.ID
-}
-
-func testIdempotency(token string) {
-	prompt := "I need a same-day basic medical check-up in Batam on 22 August with budget SGD 400"
-	payload := map[string]any{"prompt": prompt, "locale": "en"}
-	body, _ := json.Marshal(payload)
-
-	// First call
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-replay-test-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp, _ := http.DefaultClient.Do(req)
-	resp.Body.Close()
-	if resp.Header.Get("Idempotency-Replayed") == "true" {
-		panic("expected first call to not be replayed")
+	// Test Error Mapping: Capacity Conflict (409)
+	_, err = a.CreateHold(ctx, "req-conflict", "idem-conflict", adapter.CreateHoldRequest{
+		ProviderID:        "hospital-demo-01",
+		OfferID:           "hosp-offer-conflict",
+		Units:             10,
+		ExpectedUnitPrice: adapter.Money{AmountMinor: 150000000, Currency: "IDR"},
+		ClientReference:   "journey-001-hosp",
+	})
+	if !errors.As(err, &provErr) || !provErr.IsConflict() {
+		panic(fmt.Sprintf("expected 409 ProviderError on conflict, got: %v", err))
 	}
 
-	// Second call with same body -> replay
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-replay-test-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp2, _ := http.DefaultClient.Do(req)
-	resp2.Body.Close()
-	if resp2.Header.Get("Idempotency-Replayed") != "true" {
-		panic("expected second call to be replayed with Idempotency-Replayed: true")
-	}
-
-	// Third call with changed body -> 409 conflict
-	changedBody, _ := json.Marshal(map[string]any{"prompt": "Changed prompt text entirely", "locale": "en"})
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests", bytes.NewReader(changedBody))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Idempotency-Key", "idem-key-replay-test-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp3, _ := http.DefaultClient.Do(req)
-	resp3.Body.Close()
-	if resp3.StatusCode != http.StatusConflict {
-		panic(fmt.Sprintf("expected 409 Conflict on payload mismatch, got %d", resp3.StatusCode))
+	// Test Error Mapping: Expired Hold (410)
+	_, err = a.ConfirmHold(ctx, "req-expired", "idem-expired", "hosp-hold-expired")
+	if !errors.As(err, &provErr) || !provErr.IsExpired() {
+		panic(fmt.Sprintf("expected 410 ProviderError on expired hold, got: %v", err))
 	}
 }
 
-func testGetTripRequest(token1, token2, tripID string) {
-	// Access with owner token -> 200
-	req, _ := http.NewRequest(http.MethodGet, baseURL+"/v1/trip-requests/"+tripID, nil)
-	req.Header.Set("Authorization", "Bearer "+token1)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		panic(fmt.Sprintf("expected 200 on owner GET trip request, got %d", resp.StatusCode))
-	}
-	resp.Body.Close()
-
-	// Access with different patient's token -> 404
-	req, _ = http.NewRequest(http.MethodGet, baseURL+"/v1/trip-requests/"+tripID, nil)
-	req.Header.Set("Authorization", "Bearer "+token2)
-	resp2, err := http.DefaultClient.Do(req)
-	if err != nil || resp2.StatusCode != http.StatusNotFound {
-		panic(fmt.Sprintf("expected 404 on cross-patient GET trip request, got %d", resp2.StatusCode))
-	}
-	resp2.Body.Close()
-}
-
-func testAmendIntent(token1, token2, tripID string) {
-	answer := "I would like the basic medical check-up on 22 August"
-	payload := map[string]any{
-		"answer": answer,
-	}
-	body, _ := json.Marshal(payload)
-
-	// Cross-patient amend -> 404
-	req, _ := http.NewRequest(http.MethodPatch, baseURL+"/v1/trip-requests/"+tripID+"/intent", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token2)
-	req.Header.Set("Idempotency-Key", "idem-key-amend-001")
-	req.Header.Set("Content-Type", "application/json")
-	respCross, _ := http.DefaultClient.Do(req)
-	respCross.Body.Close()
-	if respCross.StatusCode != http.StatusNotFound {
-		panic(fmt.Sprintf("expected 404 on cross-patient patch intent, got %d", respCross.StatusCode))
+func testFerryAdapter(ctx context.Context, a *adapter.FerryAdapter) {
+	// Search
+	offers, err := a.Search(ctx, "req-ferry-search", adapter.FerrySearchCriteria{
+		OriginPortCode:      "HARBOURFRONT_SG",
+		DestinationPortCode: "BATAM_CENTRE_ID",
+		PassengerCount:      2,
+		DepartureWindow: adapter.TimeWindow{
+			StartsAt:      "2026-08-21T23:00:00Z",
+			EndsAt:        "2026-08-22T04:00:00Z",
+			StartTimeZone: "Asia/Singapore",
+			EndTimeZone:   "Asia/Jakarta",
+		},
+	})
+	if err != nil || len(offers) == 0 {
+		panic(fmt.Sprintf("ferry search failed: %v", err))
 	}
 
-	// Owner amend -> 200
-	req, _ = http.NewRequest(http.MethodPatch, baseURL+"/v1/trip-requests/"+tripID+"/intent", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+token1)
-	req.Header.Set("Idempotency-Key", "idem-key-amend-001")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("expected 200 on patch intent, got %d: %s", resp.StatusCode, string(raw)))
+	// Hold
+	hold, err := a.CreateHold(ctx, "req-ferry-hold", "idem-ferry-hold-01", adapter.CreateHoldRequest{
+		ProviderID:        "ferry-demo-01",
+		OfferID:           offers[0].OfferID,
+		Units:             2,
+		ExpectedUnitPrice: adapter.Money{AmountMinor: 5000, Currency: "SGD"},
+		ClientReference:   "journey-001-ferry",
+	})
+	if err != nil || hold.HoldID == "" {
+		panic(fmt.Sprintf("ferry hold failed: %v", err))
 	}
 
-	var detail struct {
-		TripRequest struct {
-			Status string `json:"status"`
-			Intent struct {
-				Resolution  string `json:"resolution"`
-				ServiceCode string `json:"service_code"`
-			} `json:"intent"`
-		} `json:"trip_request"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&detail)
-
-	if detail.TripRequest.Intent.Resolution != "MATCHED" {
-		panic(fmt.Sprintf("expected amended intent to be MATCHED, got %s", detail.TripRequest.Intent.Resolution))
-	}
-	if detail.TripRequest.Status != "PLANNING" {
-		panic(fmt.Sprintf("expected status to transition to PLANNING, got %s", detail.TripRequest.Status))
+	// Release Hold
+	rel, err := a.ReleaseHold(ctx, "req-ferry-rel-hold", "idem-ferry-rel-hold", hold.HoldID)
+	if err != nil || rel.Status != "RELEASED" {
+		panic(fmt.Sprintf("ferry release hold failed: %v", err))
 	}
 }
 
-func testPlanning(token1, token2, matchedTripID, unsupportedTripID string) {
-	// Planning for unsupported trip -> 422
-	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests/"+unsupportedTripID+"/plans", nil)
-	req.Header.Set("Authorization", "Bearer "+token1)
-	req.Header.Set("Idempotency-Key", "idem-key-plan-unsup-01")
-	respUnsup, _ := http.DefaultClient.Do(req)
-	respUnsup.Body.Close()
-	if respUnsup.StatusCode != http.StatusUnprocessableEntity {
-		panic(fmt.Sprintf("expected 422 when planning unsupported trip, got %d", respUnsup.StatusCode))
+func testHotelAdapter(ctx context.Context, a *adapter.HotelAdapter) {
+	// Search
+	offers, err := a.Search(ctx, "req-hotel-search", adapter.HotelSearchCriteria{
+		CheckInDate:   "2026-08-22",
+		CheckOutDate:  "2026-08-23",
+		LocalTimezone: "Asia/Jakarta",
+		RoomCount:     1,
+		GuestCount:    2,
+	})
+	if err != nil || len(offers) == 0 {
+		panic(fmt.Sprintf("hotel search failed: %v", err))
 	}
 
-	// Cross-patient planning -> 404
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests/"+matchedTripID+"/plans", nil)
-	req.Header.Set("Authorization", "Bearer "+token2)
-	req.Header.Set("Idempotency-Key", "idem-key-plan-001")
-	respCross, _ := http.DefaultClient.Do(req)
-	respCross.Body.Close()
-	if respCross.StatusCode != http.StatusNotFound {
-		panic(fmt.Sprintf("expected 404 on cross-patient plan generation, got %d", respCross.StatusCode))
+	// Hold
+	hold, err := a.CreateHold(ctx, "req-hotel-hold", "idem-hotel-hold-01", adapter.CreateHoldRequest{
+		ProviderID:        "hotel-demo-01",
+		OfferID:           offers[0].OfferID,
+		Units:             1,
+		ExpectedUnitPrice: adapter.Money{AmountMinor: 80000000, Currency: "IDR"},
+		ClientReference:   "journey-001-hotel",
+	})
+	if err != nil || hold.HoldID == "" {
+		panic(fmt.Sprintf("hotel hold failed: %v", err))
 	}
 
-	// Owner planning -> 200
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests/"+matchedTripID+"/plans", nil)
-	req.Header.Set("Authorization", "Bearer "+token1)
-	req.Header.Set("Idempotency-Key", "idem-key-plan-001")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("expected 200 on plan generation, got %d: %s", resp.StatusCode, string(raw)))
-	}
-
-	var planResult struct {
-		TripRequest struct {
-			Status           string `json:"status"`
-			PlanningRevision int    `json:"planning_revision"`
-		} `json:"trip_request"`
-		Options []struct {
-			ID         string `json:"id"`
-			Rank       int    `json:"rank"`
-			Status     string `json:"status"`
-			Items      []any  `json:"items"`
-			TotalPrice struct {
-				DisplayTotal struct {
-					AmountMinor int64  `json:"amount_minor"`
-					Currency    string `json:"currency"`
-				} `json:"display_total"`
-			} `json:"total_price"`
-		} `json:"options"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&planResult)
-
-	if planResult.TripRequest.Status != "PLAN_READY" {
-		panic(fmt.Sprintf("expected PLAN_READY, got %s", planResult.TripRequest.Status))
-	}
-	if len(planResult.Options) != 2 {
-		panic(fmt.Sprintf("expected 2 plan options, got %d", len(planResult.Options)))
-	}
-	if len(planResult.Options[0].Items) != 7 {
-		panic(fmt.Sprintf("expected 7 items in option 1, got %d", len(planResult.Options[0].Items)))
-	}
-	if planResult.Options[0].TotalPrice.DisplayTotal.AmountMinor <= 0 {
-		panic("expected positive display total price")
-	}
-
-	// Idempotency replay of planning
-	req, _ = http.NewRequest(http.MethodPost, baseURL+"/v1/trip-requests/"+matchedTripID+"/plans", nil)
-	req.Header.Set("Authorization", "Bearer "+token1)
-	req.Header.Set("Idempotency-Key", "idem-key-plan-001")
-	respReplay, _ := http.DefaultClient.Do(req)
-	respReplay.Body.Close()
-	if respReplay.Header.Get("Idempotency-Replayed") != "true" {
-		panic("expected replayed plan generation to have Idempotency-Replayed: true")
+	// Confirm
+	res, err := a.ConfirmHold(ctx, "req-hotel-conf", "idem-hotel-conf-01", hold.HoldID)
+	if err != nil || res.ReservationID == "" {
+		panic(fmt.Sprintf("hotel confirm failed: %v", err))
 	}
 }
 
-func init() {
-	_ = os.Setenv("PORT", "8092")
+func testTransportAdapter(ctx context.Context, a *adapter.TransportAdapter) {
+	// Search
+	offers, err := a.Search(ctx, "req-trans-search", adapter.TransportSearchCriteria{
+		PickupLocationCode:  "BATAM_CENTRE_ID",
+		DropoffLocationCode: "BATAM_MEDICAL_CENTRE_ID",
+		PassengerCount:      2,
+		PickupWindow: adapter.TimeWindow{
+			StartsAt:      "2026-08-22T01:30:00Z",
+			EndsAt:        "2026-08-22T02:00:00Z",
+			StartTimeZone: "Asia/Jakarta",
+			EndTimeZone:   "Asia/Jakarta",
+		},
+	})
+	if err != nil || len(offers) == 0 {
+		panic(fmt.Sprintf("transport search failed: %v", err))
+	}
+
+	// Hold with TransportBookingRequirements
+	hold, err := a.CreateHold(ctx, "req-trans-hold", "idem-trans-hold-01", adapter.CreateHoldRequest{
+		ProviderID:        "transport-demo-01",
+		OfferID:           offers[0].OfferID,
+		Units:             1,
+		ExpectedUnitPrice: adapter.Money{AmountMinor: 15000000, Currency: "IDR"},
+		ClientReference:   "journey-001-trans",
+		BookingRequirements: &adapter.TransportBookingRequirements{
+			PassengerCount:      2,
+			PickupLocationCode:  "BATAM_CENTRE_ID",
+			DropoffLocationCode: "BATAM_MEDICAL_CENTRE_ID",
+			PickupWindow: adapter.TimeWindow{
+				StartsAt:      "2026-08-22T01:30:00Z",
+				EndsAt:        "2026-08-22T02:00:00Z",
+				StartTimeZone: "Asia/Jakarta",
+				EndTimeZone:   "Asia/Jakarta",
+			},
+		},
+	})
+	if err != nil || hold.HoldID == "" {
+		panic(fmt.Sprintf("transport hold failed: %v", err))
+	}
+
+	// Confirm
+	res, err := a.ConfirmHold(ctx, "req-trans-conf", "idem-trans-conf-01", hold.HoldID)
+	if err != nil || res.ReservationID == "" {
+		panic(fmt.Sprintf("transport confirm failed: %v", err))
+	}
+}
+
+func testAggregator(
+	ctx context.Context,
+	hosp *adapter.HospitalAdapter,
+	ferry *adapter.FerryAdapter,
+	hotel *adapter.HotelAdapter,
+	trans *adapter.TransportAdapter,
+) {
+	// Faulty hotel adapter returning 503
+	badHotelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(adapter.ErrorEnvelope{
+			Error: adapter.ErrorBody{
+				Code:      "SERVICE_UNAVAILABLE",
+				Message:   "Hotel database offline",
+				Retryable: true,
+			},
+		})
+	}))
+	defer badHotelServer.Close()
+	faultyHotelAdapter := adapter.NewHotelAdapter(badHotelServer.URL, "hotel_dev_secret", 2*time.Second)
+
+	agg := adapter.NewAggregator(hosp, ferry, faultyHotelAdapter, trans)
+
+	result := agg.SearchAll(ctx, "req-multi-search", adapter.MultiSearchQuery{
+		HospitalCriteria: &adapter.HospitalSearchCriteria{
+			ServiceCode:  "MCU_BASIC",
+			PatientCount: 1,
+			AppointmentWindow: adapter.TimeWindow{
+				StartsAt:      "2026-08-22T02:00:00Z",
+				EndsAt:        "2026-08-22T08:00:00Z",
+				StartTimeZone: "Asia/Jakarta",
+				EndTimeZone:   "Asia/Jakarta",
+			},
+		},
+		FerryCriteria: []adapter.FerrySearchCriteria{
+			{
+				OriginPortCode:      "HARBOURFRONT_SG",
+				DestinationPortCode: "BATAM_CENTRE_ID",
+				PassengerCount:      1,
+				DepartureWindow: adapter.TimeWindow{
+					StartsAt:      "2026-08-21T23:00:00Z",
+					EndsAt:        "2026-08-22T04:00:00Z",
+					StartTimeZone: "Asia/Singapore",
+					EndTimeZone:   "Asia/Jakarta",
+				},
+			},
+		},
+		HotelCriteria: &adapter.HotelSearchCriteria{
+			CheckInDate:   "2026-08-22",
+			CheckOutDate:  "2026-08-23",
+			LocalTimezone: "Asia/Jakarta",
+			RoomCount:     1,
+			GuestCount:    1,
+		},
+		TransportCriteria: []adapter.TransportSearchCriteria{
+			{
+				PickupLocationCode:  "BATAM_CENTRE_ID",
+				DropoffLocationCode: "BATAM_MEDICAL_CENTRE_ID",
+				PassengerCount:      1,
+				PickupWindow: adapter.TimeWindow{
+					StartsAt:      "2026-08-22T01:30:00Z",
+					EndsAt:        "2026-08-22T02:00:00Z",
+					StartTimeZone: "Asia/Jakarta",
+					EndTimeZone:   "Asia/Jakarta",
+				},
+			},
+		},
+	})
+
+	if len(result.HospitalOffers) == 0 {
+		panic("expected hospital offers to succeed despite hotel outage")
+	}
+	if len(result.FerryOffers) == 0 {
+		panic("expected ferry offers to succeed despite hotel outage")
+	}
+	if len(result.TransportOffers) == 0 {
+		panic("expected transport offers to succeed despite hotel outage")
+	}
+	if len(result.Warnings) == 0 {
+		panic("expected hotel outage to be reported as a non-fatal warning")
+	}
+}
+
+func startMockProviderServer(provType, provID, secret string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify auth header
+		if r.URL.Path != "/healthz" && r.Header.Get("X-Integration-Key") != secret {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(adapter.ErrorEnvelope{
+				Error: adapter.ErrorBody{
+					Code:      "AUTHENTICATION_FAILED",
+					Message:   "Invalid integration secret",
+					Retryable: false,
+					RequestID: r.Header.Get("X-Request-ID"),
+				},
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-ID", r.Header.Get("X-Request-ID"))
+
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.HealthResponse{
+				Status:         "UP",
+				ProviderID:     provID,
+				ProviderType:   provType,
+				DatabaseStatus: "UP",
+				CheckedAt:      "2026-08-16T00:00:00Z",
+			})
+
+		case r.URL.Path == "/v1/offers/search":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.SearchResponse{
+				ProviderID:   provID,
+				ProviderType: provType,
+				Offers: []adapter.Offer{
+					{
+						OfferID:        fmt.Sprintf("%s-offer-001", provID[:4]),
+						ProviderID:     provID,
+						ProviderType:   provType,
+						Status:         "AVAILABLE",
+						ServiceWindow:  adapter.TimeWindow{StartsAt: "2026-08-22T02:00:00Z", EndsAt: "2026-08-22T04:00:00Z", StartTimeZone: "Asia/Jakarta", EndTimeZone: "Asia/Jakarta"},
+						AvailableUnits: 5,
+						UnitPrice:      adapter.Money{AmountMinor: 150000000, Currency: "IDR"},
+						ValidUntil:     "2026-08-20T12:00:00Z",
+						Synthetic:      true,
+						Source:         "MOCK",
+						Details:        json.RawMessage(`{}`),
+					},
+				},
+			})
+
+		case r.URL.Path == "/v1/holds" && r.Method == http.MethodPost:
+			var req adapter.CreateHoldRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+
+			if req.OfferID == "hosp-offer-conflict" {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(adapter.ErrorEnvelope{
+					Error: adapter.ErrorBody{
+						Code:      "CAPACITY_CONFLICT",
+						Message:   "Requested units exceed available capacity",
+						Retryable: false,
+						RequestID: r.Header.Get("X-Request-ID"),
+					},
+				})
+				return
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(adapter.Hold{
+				HoldID:            fmt.Sprintf("%s-hold-001", provID[:4]),
+				ExternalReference: fmt.Sprintf("%s-HOLD-REF-001", provID[:4]),
+				ProviderID:        provID,
+				ProviderType:      provType,
+				OfferID:           req.OfferID,
+				ClientReference:   req.ClientReference,
+				Status:            "HELD",
+				Units:             req.Units,
+				UnitPrice:         req.ExpectedUnitPrice,
+				TotalPrice:        adapter.Money{AmountMinor: req.ExpectedUnitPrice.AmountMinor * int64(req.Units), Currency: req.ExpectedUnitPrice.Currency},
+				ServiceWindow:     adapter.TimeWindow{StartsAt: "2026-08-22T02:00:00Z", EndsAt: "2026-08-22T04:00:00Z", StartTimeZone: "Asia/Jakarta", EndTimeZone: "Asia/Jakarta"},
+				CreatedAt:         "2026-08-16T00:00:00Z",
+				ExpiresAt:         "2026-08-20T12:00:00Z",
+			})
+
+		case r.Method == http.MethodPost && (len(r.URL.Path) > 17 && r.URL.Path[len(r.URL.Path)-8:] == "/confirm"):
+			if r.URL.Path == "/v1/holds/hosp-hold-expired/confirm" {
+				w.WriteHeader(http.StatusGone)
+				_ = json.NewEncoder(w).Encode(adapter.ErrorEnvelope{
+					Error: adapter.ErrorBody{
+						Code:      "HOLD_EXPIRED",
+						Message:   "Hold expired before confirmation",
+						Retryable: true,
+						RequestID: r.Header.Get("X-Request-ID"),
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(adapter.Reservation{
+				ReservationID:     fmt.Sprintf("%s-res-001", provID[:4]),
+				ExternalReference: fmt.Sprintf("%s-RES-REF-001", provID[:4]),
+				HoldID:            fmt.Sprintf("%s-hold-001", provID[:4]),
+				ProviderID:        provID,
+				ProviderType:      provType,
+				OfferID:           fmt.Sprintf("%s-offer-001", provID[:4]),
+				ClientReference:   "journey-001",
+				Status:            "CONFIRMED",
+				Units:             1,
+				TotalPrice:        adapter.Money{AmountMinor: 150000000, Currency: "IDR"},
+				ServiceWindow:     adapter.TimeWindow{StartsAt: "2026-08-22T02:00:00Z", EndsAt: "2026-08-22T04:00:00Z", StartTimeZone: "Asia/Jakarta", EndTimeZone: "Asia/Jakarta"},
+				ConfirmedAt:       "2026-08-16T00:00:00Z",
+			})
+
+		case r.Method == http.MethodGet && len(r.URL.Path) > 17 && r.URL.Path[:17] == "/v1/reservations/":
+			resID := r.URL.Path[17:]
+			if resID == "unknown-res-id" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(adapter.ErrorEnvelope{
+					Error: adapter.ErrorBody{
+						Code:      "NOT_FOUND",
+						Message:   "Reservation not found",
+						Retryable: false,
+						RequestID: r.Header.Get("X-Request-ID"),
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.Reservation{
+				ReservationID:     resID,
+				ExternalReference: fmt.Sprintf("%s-RES-REF-001", provID[:4]),
+				HoldID:            fmt.Sprintf("%s-hold-001", provID[:4]),
+				ProviderID:        provID,
+				ProviderType:      provType,
+				OfferID:           fmt.Sprintf("%s-offer-001", provID[:4]),
+				ClientReference:   "journey-001",
+				Status:            "CONFIRMED",
+				Units:             1,
+				TotalPrice:        adapter.Money{AmountMinor: 150000000, Currency: "IDR"},
+				ServiceWindow:     adapter.TimeWindow{StartsAt: "2026-08-22T02:00:00Z", EndsAt: "2026-08-22T04:00:00Z", StartTimeZone: "Asia/Jakarta", EndTimeZone: "Asia/Jakarta"},
+				ConfirmedAt:       "2026-08-16T00:00:00Z",
+			})
+
+		case r.Method == http.MethodPost && (len(r.URL.Path) > 8 && r.URL.Path[len(r.URL.Path)-8:] == "/release"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.ReleaseResult{
+				ResourceType:      "RESERVATION",
+				ResourceID:        "res-001",
+				ExternalReference: "RES-REF-001",
+				ProviderID:        provID,
+				ProviderType:      provType,
+				Status:            "RELEASED",
+				ReleasedAt:        "2026-08-16T00:00:00Z",
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
 }
