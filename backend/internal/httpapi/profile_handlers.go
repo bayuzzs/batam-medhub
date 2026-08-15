@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"batam-medhub/internal/service"
 
@@ -23,9 +24,10 @@ func handleGetProfile(svc *service.ProfileService) gin.HandlerFunc {
 				return
 			}
 			abort(c, &apiError{
-				status:  http.StatusInternalServerError,
-				code:    "INTERNAL_ERROR",
-				message: "Failed to retrieve profile.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Failed to retrieve profile.",
+				retryable: true,
 			})
 			return
 		}
@@ -40,11 +42,20 @@ func handleUpdateProfile(svc *service.ProfileService) gin.HandlerFunc {
 		sessionID := c.GetString(contextSessionIDKey)
 
 		var req service.UpdateProfileRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindStrictJSON(c, &req); err != nil {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
 				message: "Malformed request payload.",
+			})
+			return
+		}
+
+		if strings.TrimSpace(req.RefreshToken) == "" {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "Missing required refresh_token field.",
 			})
 			return
 		}
@@ -68,9 +79,10 @@ func handleUpdateProfile(svc *service.ProfileService) gin.HandlerFunc {
 				return
 			}
 			abort(c, &apiError{
-				status:  http.StatusInternalServerError,
-				code:    "INTERNAL_ERROR",
-				message: "Failed to update profile.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Failed to update profile.",
+				retryable: true,
 			})
 			return
 		}

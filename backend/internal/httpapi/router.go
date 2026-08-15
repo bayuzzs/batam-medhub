@@ -65,6 +65,7 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
+	_ = router.SetTrustedProxies(nil)
 
 	router.Use(requestID(), requestLogger(logger), structuredErrors(), recoverPanics(logger))
 
@@ -91,16 +92,18 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	profileSvc := service.NewProfileService(db, cfg)
 	catalogSvc := service.NewCatalogService(db)
 
-	authRateLimiter := newIPRateLimiter(60, time.Minute)
+	registerLimiter := newIPRateLimiter(30, time.Minute)
+	loginLimiter := newIPRateLimiter(30, time.Minute)
+	refreshLimiter := newIPRateLimiter(60, time.Minute)
 
 	v1 := router.Group("/v1")
 	{
 		authGroup := v1.Group("/auth")
-		authGroup.Use(noStoreHeader(), rateLimitMiddleware(authRateLimiter))
+		authGroup.Use(noStoreHeader())
 		{
-			authGroup.POST("/register", handleRegister(authSvc))
-			authGroup.POST("/login", handleLogin(authSvc))
-			authGroup.POST("/refresh", handleRefresh(authSvc))
+			authGroup.POST("/register", rateLimitMiddleware(registerLimiter), handleRegister(authSvc))
+			authGroup.POST("/login", rateLimitMiddleware(loginLimiter), handleLogin(authSvc))
+			authGroup.POST("/refresh", rateLimitMiddleware(refreshLimiter), handleRefresh(authSvc))
 			authGroup.POST("/logout", handleLogout(authSvc))
 		}
 

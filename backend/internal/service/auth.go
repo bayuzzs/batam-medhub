@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"batam-medhub/internal/config"
 	"batam-medhub/internal/model"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -24,6 +26,8 @@ var (
 	ErrPatientNotFound     = errors.New("patient not found")
 	ErrValidationError     = errors.New("validation error")
 )
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9.!#$%&'*+/=?^_` + "`" + `{|~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$`)
 
 // AuthService handles patient authentication, session management, and credential rotation.
 type AuthService struct {
@@ -76,6 +80,23 @@ type AuthSessionResponse struct {
 	Profile          PatientProfileResponse `json:"profile"`
 }
 
+func validateEmail(email string) error {
+	if len(email) < 3 || len(email) > 254 {
+		return errors.New("email must be between 3 and 254 characters")
+	}
+	if strings.ContainsAny(email, "<>\"(),:;[]\\ \t\r\n") {
+		return errors.New("email contains invalid characters or display syntax")
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Name != "" || parsed.Address != email {
+		return errors.New("invalid email address format")
+	}
+	if !emailRegex.MatchString(email) {
+		return errors.New("invalid email address format")
+	}
+	return nil
+}
+
 // Register validates input, checks email uniqueness, creates a new patient, and issues tokens.
 func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*AuthSessionResponse, error) {
 	fullName := strings.TrimSpace(req.FullName)
@@ -84,11 +105,8 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*AuthS
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if len(email) < 3 || len(email) > 254 {
-		return nil, fmt.Errorf("%w: email must be between 3 and 254 characters", ErrValidationError)
-	}
-	if _, err := mail.ParseAddress(email); err != nil {
-		return nil, fmt.Errorf("%w: invalid email address format", ErrValidationError)
+	if err := validateEmail(email); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidationError, err.Error())
 	}
 
 	if err := auth.ValidatePassword(req.Password); err != nil {
@@ -101,15 +119,6 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*AuthS
 	}
 	if currency != "SGD" && currency != "IDR" {
 		return nil, fmt.Errorf("%w: preferred_currency must be SGD or IDR", ErrValidationError)
-	}
-
-	var existing model.Patient
-	err := s.db.WithContext(ctx).Where("email_normalized = ?", email).First(&existing).Error
-	if err == nil {
-		return nil, ErrEmailConflict
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("check email uniqueness: %w", err)
 	}
 
 	passwordHash, err := auth.HashPassword(req.Password)
@@ -151,6 +160,13 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*AuthS
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&patient).Error; err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrEmailConflict
+			}
+			if strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "patients_email_normalized_key") {
+				return ErrEmailConflict
+			}
 			return err
 		}
 		if err := tx.Create(&session).Error; err != nil {
@@ -159,6 +175,9 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*AuthS
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrEmailConflict) {
+			return nil, ErrEmailConflict
+		}
 		return nil, fmt.Errorf("persist patient and session: %w", err)
 	}
 
@@ -381,27 +400,35 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*AuthSe
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	token := strings.TrimSpace(refreshToken)
 	if len(token) < 43 || len(token) > 256 {
-		return nil // Idempotent: return success without leaking token validity
+		return nil // Idempotent: return success for malformed tokens without leaking state
 	}
 
 	tokenHash := auth.HashToken(token)
 	now := time.Now().UTC()
 
-	_ = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var session model.AuthSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("refresh_token_hash = ?", tokenHash).
 			First(&session).Error; err != nil {
-			return nil // not found, do nothing
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil // unknown token -> 204
+			}
+			return err
 		}
 
 		if session.RevokedAt == nil {
 			session.RevokedAt = &now
 			session.LastUsedAt = &now
-			_ = tx.Save(&session)
+			if err := tx.Save(&session).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})
 
+	if err != nil {
+		return fmt.Errorf("logout session: %w", err)
+	}
 	return nil
 }

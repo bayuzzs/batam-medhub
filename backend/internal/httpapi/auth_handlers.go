@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"batam-medhub/internal/service"
 
@@ -12,11 +13,20 @@ import (
 func handleRegister(svc *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req service.RegisterRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindStrictJSON(c, &req); err != nil {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
 				message: "Malformed request payload.",
+			})
+			return
+		}
+
+		if strings.TrimSpace(req.FullName) == "" || strings.TrimSpace(req.Email) == "" || req.Password == "" {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "Missing required registration fields.",
 			})
 			return
 		}
@@ -40,9 +50,10 @@ func handleRegister(svc *service.AuthService) gin.HandlerFunc {
 				return
 			}
 			abort(c, &apiError{
-				status:  http.StatusInternalServerError,
-				code:    "INTERNAL_ERROR",
-				message: "Registration failed unexpectedly.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Registration failed unexpectedly.",
+				retryable: true,
 			})
 			return
 		}
@@ -55,11 +66,20 @@ func handleRegister(svc *service.AuthService) gin.HandlerFunc {
 func handleLogin(svc *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req service.LoginRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindStrictJSON(c, &req); err != nil {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
 				message: "Malformed request payload.",
+			})
+			return
+		}
+
+		if strings.TrimSpace(req.Email) == "" || req.Password == "" {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "Missing required login fields.",
 			})
 			return
 		}
@@ -75,9 +95,10 @@ func handleLogin(svc *service.AuthService) gin.HandlerFunc {
 				return
 			}
 			abort(c, &apiError{
-				status:  http.StatusInternalServerError,
-				code:    "INTERNAL_ERROR",
-				message: "Login failed unexpectedly.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Login failed unexpectedly.",
+				retryable: true,
 			})
 			return
 		}
@@ -89,11 +110,20 @@ func handleLogin(svc *service.AuthService) gin.HandlerFunc {
 func handleRefresh(svc *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req service.RefreshRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindStrictJSON(c, &req); err != nil {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
 				message: "Malformed request payload.",
+			})
+			return
+		}
+
+		if strings.TrimSpace(req.RefreshToken) == "" {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "Missing required refresh_token field.",
 			})
 			return
 		}
@@ -109,9 +139,10 @@ func handleRefresh(svc *service.AuthService) gin.HandlerFunc {
 				return
 			}
 			abort(c, &apiError{
-				status:  http.StatusInternalServerError,
-				code:    "INTERNAL_ERROR",
-				message: "Session refresh failed unexpectedly.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Session refresh failed unexpectedly.",
+				retryable: true,
 			})
 			return
 		}
@@ -123,7 +154,7 @@ func handleRefresh(svc *service.AuthService) gin.HandlerFunc {
 func handleLogout(svc *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req service.RefreshRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindStrictJSON(c, &req); err != nil {
 			abort(c, &apiError{
 				status:  http.StatusBadRequest,
 				code:    "BAD_REQUEST",
@@ -132,7 +163,25 @@ func handleLogout(svc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		_ = svc.Logout(c.Request.Context(), req.RefreshToken)
+		if strings.TrimSpace(req.RefreshToken) == "" {
+			abort(c, &apiError{
+				status:  http.StatusBadRequest,
+				code:    "BAD_REQUEST",
+				message: "Missing required refresh_token field.",
+			})
+			return
+		}
+
+		if err := svc.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+			abort(c, &apiError{
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Logout failed unexpectedly.",
+				retryable: true,
+			})
+			return
+		}
+
 		c.Status(http.StatusNoContent)
 	}
 }

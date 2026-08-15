@@ -121,8 +121,26 @@ func ValidateAccessToken(tokenString, secret, expectedIssuer, expectedAudience s
 		return nil, ErrInvalidTokenAudience
 	}
 
+	const (
+		clockSkewSeconds    = int64(60)   // 60 seconds allowable clock skew
+		maxAllowedTTLSeconds = int64(3600) // Maximum 1 hour token lifespan per OpenAPI spec
+	)
+
+	if claims.IssuedAt <= 0 || claims.ExpiresAt <= 0 {
+		return nil, ErrInvalidClaims
+	}
+	if claims.IssuedAt > claims.ExpiresAt {
+		return nil, ErrInvalidClaims
+	}
+	if (claims.ExpiresAt - claims.IssuedAt) > (maxAllowedTTLSeconds + clockSkewSeconds) {
+		return nil, ErrInvalidClaims
+	}
+
 	now := time.Now().UTC().Unix()
-	if claims.ExpiresAt <= now {
+	if claims.IssuedAt > (now + clockSkewSeconds) {
+		return nil, ErrInvalidClaims // Token claims to be issued in the future
+	}
+	if claims.ExpiresAt <= (now - clockSkewSeconds) {
 		return nil, ErrTokenExpired
 	}
 

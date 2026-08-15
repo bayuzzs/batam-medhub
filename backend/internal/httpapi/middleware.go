@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,12 +60,21 @@ func patientBearerAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 		now := time.Now().UTC()
 		var session model.AuthSession
 		if err := db.WithContext(c.Request.Context()).
-			Where("id = ? AND revoked_at IS NULL AND expires_at > ?", claims.SessionID, now).
+			Where("id = ? AND patient_id = ? AND revoked_at IS NULL AND expires_at > ?", claims.SessionID, claims.Subject, now).
 			First(&session).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				abort(c, &apiError{
+					status:  http.StatusUnauthorized,
+					code:    "UNAUTHORIZED",
+					message: "Session has been revoked or expired.",
+				})
+				return
+			}
 			abort(c, &apiError{
-				status:  http.StatusUnauthorized,
-				code:    "UNAUTHORIZED",
-				message: "Session has been revoked or expired.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Core database is unavailable.",
+				retryable: true,
 			})
 			return
 		}
@@ -72,10 +83,19 @@ func patientBearerAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 		if err := db.WithContext(c.Request.Context()).
 			Where("id = ? AND status = 'ACTIVE'", claims.Subject).
 			First(&patient).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				abort(c, &apiError{
+					status:  http.StatusUnauthorized,
+					code:    "UNAUTHORIZED",
+					message: "Patient account is not active.",
+				})
+				return
+			}
 			abort(c, &apiError{
-				status:  http.StatusUnauthorized,
-				code:    "UNAUTHORIZED",
-				message: "Patient account is not active.",
+				status:    http.StatusInternalServerError,
+				code:      "INTERNAL_ERROR",
+				message:   "Core database is unavailable.",
+				retryable: true,
 			})
 			return
 		}
@@ -97,7 +117,9 @@ func patientBearerAuth(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 	}
 }
 
-// ipRateLimiter implements a bounded in-memory sliding window rate limiter per client IP.
+const maxRateLimiterEntries = 10000
+
+// ipRateLimiter implements a bounded in-memory sliding window rate limiter per client socket IP.
 type ipRateLimiter struct {
 	mu      sync.Mutex
 	limit   int
@@ -119,6 +141,23 @@ func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
 
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
+
+	// Prune expired entries if capacity threshold is reached
+	if len(rl.clients) >= maxRateLimiterEntries {
+		for k, v := range rl.clients {
+			valid := make([]time.Time, 0, len(v))
+			for _, t := range v {
+				if t.After(cutoff) {
+					valid = append(valid, t)
+				}
+			}
+			if len(valid) == 0 {
+				delete(rl.clients, k)
+			} else {
+				rl.clients[k] = valid
+			}
+		}
+	}
 
 	timestamps := rl.clients[ip]
 	valid := make([]time.Time, 0, len(timestamps))
@@ -142,9 +181,17 @@ func (rl *ipRateLimiter) allow(ip string) (bool, time.Duration) {
 	return true, 0
 }
 
+func extractSocketIP(c *gin.Context) string {
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		return c.Request.RemoteAddr
+	}
+	return host
+}
+
 func rateLimitMiddleware(limiter *ipRateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
+		ip := extractSocketIP(c)
 		allowed, retryAfter := limiter.allow(ip)
 		if !allowed {
 			seconds := int(retryAfter.Seconds())

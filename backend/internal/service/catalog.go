@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"batam-medhub/internal/model"
 
 	"gorm.io/gorm"
 )
+
+// ErrUnsupportedService is returned when a requested medical service is inactive or not recognized.
+var ErrUnsupportedService = errors.New("unsupported medical service")
 
 // CatalogService provides operations for querying supported medical services.
 type CatalogService struct {
@@ -56,4 +60,25 @@ func (s *CatalogService) ListMedicalServices(ctx context.Context) (*MedicalServi
 	}
 
 	return &MedicalServiceListResponse{Services: items}, nil
+}
+
+// LookupMedicalService queries a single active medical service by code.
+func (s *CatalogService) LookupMedicalService(ctx context.Context, code string) (*MedicalServiceItem, error) {
+	var r model.MedicalService
+	if err := s.db.WithContext(ctx).Where("code = ? AND active = ?", code, true).First(&r).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUnsupportedService
+		}
+		return nil, fmt.Errorf("lookup medical service %s: %w", code, err)
+	}
+
+	return &MedicalServiceItem{
+		Code:        r.Code,
+		Name:        r.Name,
+		Category:    r.Category,
+		Description: r.Description,
+		Active:      r.Active,
+		Synthetic:   r.Synthetic,
+		Source:      r.Source,
+	}, nil
 }

@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
+	"math/big"
 	"time"
 
 	"batam-medhub/internal/model"
@@ -34,7 +33,7 @@ type ConvertedMoney struct {
 	Estimated     bool      `json:"estimated"`
 }
 
-// MoneyService performs currency conversions using static exchange rates.
+// MoneyService performs currency conversions using static exchange rates and exact rational math.
 type MoneyService struct {
 	db *gorm.DB
 }
@@ -44,22 +43,13 @@ func NewMoneyService(db *gorm.DB) *MoneyService {
 	return &MoneyService{db: db}
 }
 
-// Convert converts source money into target display currency using stored static FX rates.
+// Convert converts source money into target display currency using exact rational decimal arithmetic against seeded FX rows.
 func (s *MoneyService) Convert(ctx context.Context, source Money, targetCurrency string) (*ConvertedMoney, error) {
 	if targetCurrency != "SGD" && targetCurrency != "IDR" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCurrency, targetCurrency)
 	}
-
-	if source.Currency == targetCurrency {
-		now := time.Now().UTC()
-		return &ConvertedMoney{
-			Source:        source,
-			Display:       source,
-			FXRate:        "1.000000",
-			FXSource:      "IDENTITY",
-			FXEffectiveAt: now,
-			Estimated:     true,
-		}, nil
+	if source.Currency != "SGD" && source.Currency != "IDR" {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCurrency, source.Currency)
 	}
 
 	var fx model.FXRate
@@ -74,17 +64,37 @@ func (s *MoneyService) Convert(ctx context.Context, source Money, targetCurrency
 		return nil, fmt.Errorf("lookup fx rate: %w", err)
 	}
 
-	rateFloat, err := strconv.ParseFloat(fx.Rate, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parse fx rate: %w", err)
+	rateRat := new(big.Rat)
+	if _, ok := rateRat.SetString(fx.Rate); !ok {
+		return nil, fmt.Errorf("parse fx rate rational: %s", fx.Rate)
 	}
 
-	displayAmountMinor := int64(math.Round(float64(source.AmountMinor) * rateFloat))
+	amountRat := new(big.Rat).SetInt64(source.AmountMinor)
+	productRat := new(big.Rat).Mul(amountRat, rateRat)
+
+	num := productRat.Num()
+	denom := productRat.Denom()
+
+	// Deterministic half-up rounding without floating-point math: (2*num + denom) / (2*denom)
+	two := big.NewInt(2)
+	scaledNum := new(big.Int).Mul(num, two)
+	scaledDenom := new(big.Int).Mul(denom, two)
+
+	if num.Sign() >= 0 {
+		scaledNum.Add(scaledNum, denom)
+	} else {
+		scaledNum.Sub(scaledNum, denom)
+	}
+
+	roundedInt := new(big.Int).Quo(scaledNum, scaledDenom)
+	if !roundedInt.IsInt64() {
+		return nil, fmt.Errorf("converted amount minor overflow: %s", roundedInt.String())
+	}
 
 	return &ConvertedMoney{
 		Source: source,
 		Display: Money{
-			AmountMinor: displayAmountMinor,
+			AmountMinor: roundedInt.Int64(),
 			Currency:    targetCurrency,
 		},
 		FXRate:        fx.Rate,
