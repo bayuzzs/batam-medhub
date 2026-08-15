@@ -54,7 +54,7 @@ func (s *DemoService) ResetDemoData(ctx context.Context, req DemoResetRequest) (
 	// Truncate all dynamic tables in PostgreSQL.
 	// TRUNCATE CASCADE cleanly deletes all rows without firing row-level immutability triggers.
 	truncateSQL := `
-		TRUNCATE TABLE 
+		TRUNCATE TABLE
 			recovery_items,
 			recovery_options,
 			disruptions,
