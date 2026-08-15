@@ -468,13 +468,24 @@ CREATE INDEX itinerary_items_provider_reservation_idx
 
 CREATE FUNCTION protect_itinerary_items() RETURNS trigger AS $$
 DECLARE
-    parent_status varchar(16);
-    parent_id uuid;
+    old_parent_status varchar(16);
+    new_parent_status varchar(16);
 BEGIN
-    parent_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.itinerary_version_id ELSE NEW.itinerary_version_id END;
-    SELECT status INTO parent_status FROM itinerary_versions WHERE id = parent_id;
-    IF parent_status IN ('ACTIVE', 'SUPERSEDED') THEN
-        RAISE EXCEPTION 'items in an activated itinerary version are immutable';
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        SELECT status INTO old_parent_status
+        FROM itinerary_versions
+        WHERE id = OLD.itinerary_version_id;
+        IF old_parent_status IN ('ACTIVE', 'SUPERSEDED') THEN
+            RAISE EXCEPTION 'items in an activated itinerary version are immutable';
+        END IF;
+    END IF;
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN
+        SELECT status INTO new_parent_status
+        FROM itinerary_versions
+        WHERE id = NEW.itinerary_version_id;
+        IF new_parent_status IN ('ACTIVE', 'SUPERSEDED') THEN
+            RAISE EXCEPTION 'items in an activated itinerary version are immutable';
+        END IF;
     END IF;
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
