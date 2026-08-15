@@ -91,6 +91,9 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	authSvc := service.NewAuthService(db, cfg)
 	profileSvc := service.NewProfileService(db, cfg)
 	catalogSvc := service.NewCatalogService(db)
+	moneySvc := service.NewMoneyService(db)
+	idemSvc := service.NewIdempotencyService(db)
+	tripSvc := service.NewTripService(db, catalogSvc, moneySvc)
 
 	registerLimiter := newIPRateLimiter(30, time.Minute)
 	loginLimiter := newIPRateLimiter(30, time.Minute)
@@ -118,6 +121,15 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 		catalogGroup.Use(patientBearerAuth(db, cfg))
 		{
 			catalogGroup.GET("", handleListMedicalServices(catalogSvc))
+		}
+
+		tripGroup := v1.Group("/trip-requests")
+		tripGroup.Use(patientBearerAuth(db, cfg))
+		{
+			tripGroup.POST("", handleCreateTripRequest(tripSvc, idemSvc))
+			tripGroup.GET("/:trip_request_id", handleGetTripRequest(tripSvc))
+			tripGroup.PATCH("/:trip_request_id/intent", handleAmendTripRequestIntent(tripSvc, idemSvc))
+			tripGroup.POST("/:trip_request_id/plans", handleGenerateTripPlans(tripSvc, idemSvc))
 		}
 	}
 
