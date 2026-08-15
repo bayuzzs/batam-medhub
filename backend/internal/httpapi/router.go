@@ -72,7 +72,7 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	router.HandleMethodNotAllowed = true
 	_ = router.SetTrustedProxies(nil)
 
-	router.Use(requestID(), requestLogger(logger), structuredErrors(), recoverPanics(logger))
+	router.Use(cors(), requestID(), requestLogger(logger), structuredErrors(), recoverPanics(logger))
 
 	router.NoRoute(func(c *gin.Context) {
 		abort(c, &apiError{

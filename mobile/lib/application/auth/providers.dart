@@ -14,12 +14,20 @@ import 'package:mobile/data/service/token_store.dart';
 
 import 'auth_controller.dart';
 
-/// DI switch: `true` (default) uses the fake [FakeAuthRepository] with a
-/// `shared_preferences`-backed token store, so demo sessions survive a full
-/// app restart without a backend or platform secure storage. Set to `false`
-/// (or override [authRepositoryProvider] / [tokenStoreProvider]) to use the
-/// real Dio backend + `flutter_secure_storage`.
-const bool kUseFakeBackend = true;
+/// DI switch. `false` (default) uses the real Dio backend
+/// ([AuthRepositoryImpl] + [DioAuthApi]) with a secure token store, so the app
+/// talks to the live core API. Set to `true` (or override
+/// [authRepositoryProvider] / [tokenStoreProvider]) to use the fake
+/// [FakeAuthRepository] with a `shared_preferences`-backed token store.
+///
+/// Overridable at build/run time without editing code:
+/// ```sh
+/// flutter run --dart-define=USE_FAKE_BACKEND=true
+/// ```
+const bool kUseFakeBackend = bool.fromEnvironment(
+  'USE_FAKE_BACKEND',
+  defaultValue: false,
+);
 
 /// Token persistence. Fake mode persists via `shared_preferences` so a full
 /// reload restores the demo session; real mode uses secure storage. Tests

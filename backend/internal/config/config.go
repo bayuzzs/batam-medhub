@@ -98,7 +98,7 @@ func Load() (Config, error) {
 		cfg.TransportIntegrationKey = "transport_dev_secret"
 	}
 	if cfg.CloudflareAIModel == "" {
-		cfg.CloudflareAIModel = "@cf/meta/llama-3.1-8b-instruct"
+		cfg.CloudflareAIModel = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 	}
 	if cfg.CloudflareAIBaseURL == "" {
 		cfg.CloudflareAIBaseURL = "https://api.cloudflare.com/client/v4"

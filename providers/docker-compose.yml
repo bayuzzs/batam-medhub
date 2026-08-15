@@ -9,6 +9,10 @@ services:
       FERRY_DB_PASSWORD: ${FERRY_DB_PASSWORD:-ferry_dev_password}
       HOTEL_DB_PASSWORD: ${HOTEL_DB_PASSWORD:-hotel_dev_password}
       TRANSPORT_DB_PASSWORD: ${TRANSPORT_DB_PASSWORD:-transport_dev_password}
+    ports:
+      # Exposed to the host so the core backend (run on the host) can reach
+      # `core_db` on localhost:5432, as documented in backend/README.md.
+      - "5432:5432"
     volumes:
       - provider-postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
