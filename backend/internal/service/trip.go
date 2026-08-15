@@ -240,6 +240,12 @@ func (s *TripService) GetTripRequest(ctx context.Context, patientID, tripID stri
 		return nil, err
 	}
 
+	var journeyID *string
+	var j model.Journey
+	if err := s.db.WithContext(ctx).Where("trip_request_id = ?", trip.ID).First(&j).Error; err == nil {
+		journeyID = &j.ID
+	}
+
 	return &TripRequestDetail{
 		TripRequest: TripRequestDTO{
 			ID:                trip.ID,
@@ -247,7 +253,7 @@ func (s *TripService) GetTripRequest(ctx context.Context, patientID, tripID stri
 			Intent:            intent,
 			PlanningRevision:  trip.PlanningRevision,
 			ReferenceCurrency: trip.ReferenceCurrency,
-			JourneyID:         nil,
+			JourneyID:         journeyID,
 			CreatedAt:         trip.CreatedAt,
 			UpdatedAt:         trip.UpdatedAt,
 		},
@@ -785,9 +791,19 @@ func (s *TripService) assemblePackage(
 	// Transport dropoff: starts 13:30 WIB (30-min release buffer), arrives terminal 14:00 WIB
 	// Departure buffer: 14:00 to 14:30 WIB (30-min terminal buffer)
 	// Return ferry: departs 14:30 WIB
+	cleanDate := strings.ReplaceAll(dateStr, "-", "")
+	hospitalOffer := "hospital-offer-mcu-basic-" + cleanDate + "-1000"
+	hospPrice := hospitalPrice
+	ferryRetOffer := "ferry-offer-btm-hf-" + cleanDate + "-1430"
+	if rank == 2 {
+		hospitalOffer = "hospital-offer-mcu-basic-" + cleanDate + "-1300"
+		hospPrice, _ = s.money.Convert(ctx, Money{AmountMinor: 200000000, Currency: "IDR"}, refCurr)
+		ferryRetOffer = "ferry-offer-btm-hf-" + cleanDate + "-1600"
+	}
+
 	items := []*model.PlanItem{
 		// 1. FERRY_OUTBOUND
-		createItem(planID, 1, stringPtr(ferryID), stringPtr("ferry-offer-hf-btm-"+dateStr), "FERRY_OUTBOUND",
+		createItem(planID, 1, stringPtr(ferryID), stringPtr("ferry-offer-hf-btm-"+cleanDate+"-0730"), "FERRY_OUTBOUND",
 			"HarbourFront to Batam Centre", baseTime.Add(7*time.Hour+30*time.Minute), baseTime.Add(8*time.Hour+40*time.Minute),
 			"Asia/Singapore", "Asia/Jakarta", stringPtr("HARBOURFRONT_SG"), stringPtr("BATAM_CENTRE_ID"),
 			ferryOutPrice, expiresAt, []string{"Check in at least 60 minutes before departure."}),
@@ -799,21 +815,21 @@ func (s *TripService) assemblePackage(
 			nil, expiresAt, []string{"Terminal immigration clearance."}),
 
 		// 3. TRANSPORT_PICKUP
-		createItem(planID, 3, stringPtr(transportID), stringPtr("transport-offer-pickup-"+dateStr), "TRANSPORT_PICKUP",
+		createItem(planID, 3, stringPtr(transportID), stringPtr("transport-offer-btm-hospital-"+cleanDate+"-0825"), "TRANSPORT_PICKUP",
 			"Private transfer to Batam Medical Centre", baseTime.Add(9*time.Hour+25*time.Minute), baseTime.Add(9*time.Hour+55*time.Minute),
-			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_CENTRE_ID"), stringPtr("BATAM_MEDICAL_CENTRE_ID"),
+			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_CENTRE_ID"), stringPtr("HOSPITAL_DEMO_ID"),
 			transportPickPrice, expiresAt, []string{"Driver meets at terminal arrival hall."}),
 
 		// 4. HOSPITAL_APPOINTMENT
-		createItem(planID, 4, stringPtr(hospitalID), stringPtr("hosp-offer-mcu-"+dateStr), "HOSPITAL_APPOINTMENT",
+		createItem(planID, 4, stringPtr(hospitalID), stringPtr(hospitalOffer), "HOSPITAL_APPOINTMENT",
 			"Basic Medical Check-up Appointment", baseTime.Add(10*time.Hour), baseTime.Add(13*time.Hour),
-			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_MEDICAL_CENTRE_ID"), stringPtr("BATAM_MEDICAL_CENTRE_ID"),
-			hospitalPrice, expiresAt, []string{"Fasting required 8 hours prior to check-up."}),
+			"Asia/Jakarta", "Asia/Jakarta", stringPtr("HOSPITAL_DEMO_ID"), stringPtr("HOSPITAL_DEMO_ID"),
+			hospPrice, expiresAt, []string{"Fasting required 8 hours prior to check-up."}),
 
 		// 5. TRANSPORT_DROPOFF (30 min post-appointment buffer)
-		createItem(planID, 5, stringPtr(transportID), stringPtr("transport-offer-dropoff-"+dateStr), "TRANSPORT_DROPOFF",
+		createItem(planID, 5, stringPtr(transportID), stringPtr("transport-offer-hospital-btm-"+cleanDate+"-1345"), "TRANSPORT_DROPOFF",
 			"Transfer from Batam Medical Centre to Ferry Terminal", baseTime.Add(13*time.Hour+30*time.Minute), baseTime.Add(14*time.Hour),
-			"Asia/Jakarta", "Asia/Jakarta", stringPtr("BATAM_MEDICAL_CENTRE_ID"), stringPtr("BATAM_CENTRE_ID"),
+			"Asia/Jakarta", "Asia/Jakarta", stringPtr("HOSPITAL_DEMO_ID"), stringPtr("BATAM_CENTRE_ID"),
 			transportDropPrice, expiresAt, []string{"Meet driver at clinic lobby."}),
 
 		// 6. DEPARTURE_BUFFER (30 min terminal check-in buffer)
@@ -823,7 +839,7 @@ func (s *TripService) assemblePackage(
 			nil, expiresAt, []string{"Immigration and security clearance."}),
 
 		// 7. FERRY_RETURN
-		createItem(planID, 7, stringPtr(ferryID), stringPtr("ferry-offer-ret-"+dateStr), "FERRY_RETURN",
+		createItem(planID, 7, stringPtr(ferryID), stringPtr(ferryRetOffer), "FERRY_RETURN",
 			"Batam Centre to HarbourFront", baseTime.Add(14*time.Hour+30*time.Minute), baseTime.Add(15*time.Hour+40*time.Minute),
 			"Asia/Jakarta", "Asia/Singapore", stringPtr("BATAM_CENTRE_ID"), stringPtr("HARBOURFRONT_SG"),
 			ferryRetPrice, expiresAt, []string{"Check in at least 30 minutes before departure."}),

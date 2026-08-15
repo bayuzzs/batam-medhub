@@ -62,6 +62,9 @@ func (e *apiError) Error() string { return e.code }
 
 // New constructs and configures the Gin HTTP engine with middleware and routes.
 func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
@@ -102,6 +105,8 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	aggregator := adapter.NewAggregator(hospAdapter, ferryAdapter, hotelAdapter, transAdapter)
 
 	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator)
+	bookingSvc := service.NewBookingSagaService(db, hospAdapter, ferryAdapter, hotelAdapter, transAdapter, moneySvc)
+	journeySvc := service.NewJourneyService(db)
 
 	registerLimiter := newIPRateLimiter(30, time.Minute)
 	loginLimiter := newIPRateLimiter(30, time.Minute)
@@ -138,6 +143,22 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 			tripGroup.GET("/:trip_request_id", handleGetTripRequest(tripSvc))
 			tripGroup.PATCH("/:trip_request_id/intent", handleAmendTripRequestIntent(tripSvc, idemSvc))
 			tripGroup.POST("/:trip_request_id/plans", handleGenerateTripPlans(tripSvc, idemSvc))
+			tripGroup.POST("/:trip_request_id/select-plan", handleSelectPlanForTrip(bookingSvc, tripSvc, idemSvc))
+		}
+
+		planGroup := v1.Group("/plan-options")
+		planGroup.Use(patientBearerAuth(db, cfg))
+		{
+			planGroup.POST("/:plan_option_id/confirm", handleConfirmPlanOption(bookingSvc, idemSvc))
+		}
+
+		journeyGroup := v1.Group("/journeys")
+		journeyGroup.Use(patientBearerAuth(db, cfg))
+		{
+			journeyGroup.GET("", handleListJourneys(journeySvc))
+			journeyGroup.GET("/:journey_id", handleGetJourneyItinerary(journeySvc))
+			journeyGroup.GET("/:journey_id/itinerary", handleGetJourneyItinerary(journeySvc))
+			journeyGroup.GET("/:journey_id/itineraries/:version", handleGetJourneyItineraryVersion(journeySvc))
 		}
 	}
 
