@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'package:mobile/ui/core/app_assets.dart';
-import 'package:mobile/ui/core/app_container.dart';
-import 'package:mobile/ui/core/app_router.dart';
-import 'package:mobile/ui/core/primary_radial_gradient.dart';
+import 'package:mobile/ui/core/theme/app_assets.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
+import 'package:mobile/ui/core/navigation/app_router.dart';
+import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 
 /// First screen shown when the app launches.
 ///

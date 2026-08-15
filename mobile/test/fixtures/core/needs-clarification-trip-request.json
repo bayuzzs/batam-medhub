@@ -1,0 +1,41 @@
+{
+  "trip_request": {
+    "id": "trip-000002",
+    "status": "NEEDS_INPUT",
+    "intent": {
+      "schema_version": "1.0",
+      "resolution": "NEEDS_CLARIFICATION",
+      "intent_category": "PREVENTIVE_CHECKUP",
+      "requested_service_text": "medical check-up",
+      "service_code": null,
+      "candidate_service_codes": [
+        "MCU_BASIC",
+        "MCU_COMPREHENSIVE"
+      ],
+      "origin_port": "HARBOURFRONT_SG",
+      "date_window": null,
+      "patient_count": 1,
+      "companion_count": 0,
+      "stay_type": null,
+      "budget": null,
+      "preferences": {
+        "language": "en",
+        "hotel_tier": null,
+        "accessibility": []
+      },
+      "missing_fields": [
+        "service_code",
+        "date_window"
+      ],
+      "clarification_question": "Would you like the basic or comprehensive check-up, and what date would you prefer?",
+      "out_of_scope_reason": null,
+      "unsupported_reason": null
+    },
+    "planning_revision": 0,
+    "reference_currency": "SGD",
+    "journey_id": null,
+    "created_at": "2026-08-15T08:05:00Z",
+    "updated_at": "2026-08-15T08:05:01Z"
+  },
+  "plan_options": []
+}

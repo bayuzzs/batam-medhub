@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobile/ui/core/theme/app_colors.dart';
+
 /// Text input with its label rendered above the box, not inside the border.
 ///
 /// Wraps a [TextFormField] in a column with [label] on top, so the label never
@@ -76,6 +78,10 @@ class AppTextField extends StatelessWidget {
           decoration: InputDecoration(
             prefixIcon: prefixIcon,
             suffixIcon: suffixIcon,
+            // Icons inside the field use the regular text color, not the
+            // white icon-button default.
+            prefixIconColor: AppColors.text,
+            suffixIconColor: AppColors.text,
           ),
         ),
       ],

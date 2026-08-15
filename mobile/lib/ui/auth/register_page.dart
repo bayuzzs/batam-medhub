@@ -1,26 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import 'package:mobile/ui/core/app_assets.dart';
-import 'package:mobile/ui/core/app_container.dart';
-import 'package:mobile/ui/core/app_router.dart';
-import 'package:mobile/ui/core/app_text_field.dart';
-import 'package:mobile/ui/core/app_validators.dart';
-import 'package:mobile/ui/core/primary_radial_gradient.dart';
+import 'package:mobile/application/auth/providers.dart';
+import 'package:mobile/ui/core/theme/app_assets.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
+import 'package:mobile/ui/core/navigation/app_router.dart';
+import 'package:mobile/ui/core/widgets/app_text_field.dart';
+import 'package:mobile/ui/core/widgets/app_validators.dart';
+import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 
 /// Register screen.
 ///
 /// Similar layout to [LoginPage] (see `login_page.dart`) but with full name,
-/// email, password and confirm password fields. Pure UI — no auth integration
-/// yet.
-class RegisterPage extends StatefulWidget {
+/// email, password and confirm password fields. On success the
+/// [authControllerProvider] transitions to `authenticated` and the router
+/// redirects to the chat shell; failures surface as a snackbar.
+class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
 
   @override
-  State<RegisterPage> createState() => _RegisterPageState();
+  ConsumerState<RegisterPage> createState() => _RegisterPageState();
 }
 
-class _RegisterPageState extends State<RegisterPage> {
+class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -38,10 +41,23 @@ class _RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
-  void _register() {
-    // TODO(auth): register against the auth service once integrated.
-    if (_formKey.currentState?.validate() ?? false) {
-      // Placeholder until auth integration.
+  Future<void> _register() async {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    final notifier = ref.read(authControllerProvider.notifier);
+    final ok = await notifier.register(
+      fullName: _fullNameController.text.trim(),
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+    if (!ok && mounted) {
+      final message =
+          ref.read(authControllerProvider).errorMessage ??
+          'Unable to register. Please try again.';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -52,6 +68,9 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isSubmitting = ref.watch(
+      authControllerProvider.select((state) => state.isSubmitting),
+    );
 
     return Scaffold(
       body: Stack(
@@ -114,6 +133,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         textInputAction: TextInputAction.next,
                         prefixIcon: const Icon(LucideIcons.lock),
                         suffixIcon: IconButton(
+                          color: theme.colorScheme.onSurfaceVariant,
                           icon: Icon(
                             _obscurePassword
                                 ? LucideIcons.eyeOff
@@ -135,6 +155,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         textInputAction: TextInputAction.done,
                         prefixIcon: const Icon(LucideIcons.lock),
                         suffixIcon: IconButton(
+                          color: theme.colorScheme.onSurfaceVariant,
                           icon: Icon(
                             _obscureConfirmPassword
                                 ? LucideIcons.eyeOff
@@ -157,8 +178,14 @@ class _RegisterPageState extends State<RegisterPage> {
                 ),
                 const SizedBox(height: 24),
                 FilledButton(
-                  onPressed: _register,
-                  child: const Text('Register'),
+                  onPressed: isSubmitting ? null : _register,
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Text('Register'),
                 ),
                 const SizedBox(height: 16),
                 Row(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mobile/ui/core/app_colors.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
 
 /// Font families used across the app.
 ///
@@ -40,7 +40,21 @@ abstract final class AppTheme {
     return base.copyWith(
       textTheme: _appTextTheme(base.textTheme),
       filledButtonTheme: _filledButtonTheme(),
+      iconButtonTheme: _iconButtonTheme(),
       inputDecorationTheme: _inputDecorationTheme(scheme),
+      chipTheme: _chipTheme(),
+    );
+  }
+
+  /// Global chip style: fully rounded (stadium) with no border, compact
+  /// label/icon sizing, and a tighter gap between the icon and label.
+  static ChipThemeData _chipTheme() {
+    return ChipThemeData(
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+      iconTheme: const IconThemeData(size: 14),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
     );
   }
 
@@ -49,11 +63,18 @@ abstract final class AppTheme {
   static FilledButtonThemeData _filledButtonTheme() {
     return FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        minimumSize: const Size(64, 56),
+        minimumSize: const Size(64, 32),
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
+    );
+  }
+
+  /// Global icon button style: icons render in white by default.
+  static IconButtonThemeData _iconButtonTheme() {
+    return IconButtonThemeData(
+      style: IconButton.styleFrom(foregroundColor: Colors.white),
     );
   }
 
