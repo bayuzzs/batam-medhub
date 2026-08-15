@@ -20,7 +20,7 @@ Future<void> _pumpApp(WidgetTester tester) async {
 }
 
 /// Logs in through the onboarding → login flow, landing on the chat screen
-/// (the first shell destination shown after login).
+/// (the app's primary authenticated screen after login).
 Future<void> _loginToChat(WidgetTester tester) async {
   await tester.tap(find.text('Get Started'));
   await tester.pumpAndSettle();
@@ -99,8 +99,8 @@ void main() {
     await _pumpApp(tester);
     await _loginToChat(tester);
 
-    // Open the Profile tab — shows the signed-in patient.
-    await tester.tap(find.byKey(const Key('app_bottom_nav_item_2')));
+    // Open Profile from the chat top bar — shows the signed-in patient.
+    await tester.tap(find.byKey(const Key('chat_profile_button')));
     await tester.pumpAndSettle();
     expect(find.text('Profile'), findsOneWidget);
     expect(find.text('Rina Tan'), findsOneWidget);
@@ -111,7 +111,7 @@ void main() {
     expect(find.text('Welcome Back!'), findsOneWidget);
   });
 
-  testWidgets('Bottom nav switches from chat to History', (
+  testWidgets('Chat top bar navigates to History and back', (
     WidgetTester tester,
   ) async {
     await _pumpApp(tester);
@@ -119,63 +119,37 @@ void main() {
     // Login through to the chat screen.
     await _loginToChat(tester);
 
-    // Bottom nav shows the three destinations (label-less, keyed items).
-    expect(find.byKey(const Key('app_bottom_nav_item_0')), findsOneWidget);
-    expect(find.byKey(const Key('app_bottom_nav_item_1')), findsOneWidget);
-    expect(find.byKey(const Key('app_bottom_nav_item_2')), findsOneWidget);
+    // The pinned top bar shows both actions.
+    expect(find.byKey(const Key('chat_history_button')), findsOneWidget);
+    expect(find.byKey(const Key('chat_profile_button')), findsOneWidget);
 
     // Tap History → history page is shown.
-    await tester.tap(find.byKey(const Key('app_bottom_nav_item_0')));
+    await tester.tap(find.byKey(const Key('chat_history_button')));
     await tester.pumpAndSettle();
     expect(
       find.text('Your past medical journeys will appear here.'),
       findsOneWidget,
     );
-  });
 
-  testWidgets('Bottom nav is a floating pill, not full-screen height', (
-    WidgetTester tester,
-  ) async {
-    await _pumpApp(tester);
-
-    // Login through to the chat screen (the shell with the nav bar).
-    await _loginToChat(tester);
-
-    // The nav bar must shrink-wrap its content, not stretch to the screen.
-    // (Scaffold passes a full-screen-height constraint to the
-    // bottomNavigationBar slot; a Center would expand to fill it.)
-    final pill = find.byKey(const Key('app_bottom_nav_pill'));
-    final pillSize = tester.getSize(pill);
-    final screenSize = tester.getSize(find.byType(Scaffold).first);
-
-    // Fit-to-content width: the pill is narrower than the screen.
-    expect(pillSize.width, lessThan(screenSize.width));
-    // Floating height: nowhere near full screen.
-    expect(pillSize.height, lessThan(screenSize.height / 2));
-  });
-
-  testWidgets('Selected circle animates to the tapped item', (
-    WidgetTester tester,
-  ) async {
-    await _pumpApp(tester);
-    await _loginToChat(tester);
-
-    // The circle starts over the active tab (chat = item 1).
-    final indicator = find.byKey(const Key('app_bottom_nav_indicator'));
-    final item0 = find.byKey(const Key('app_bottom_nav_item_0'));
-    final item1 = find.byKey(const Key('app_bottom_nav_item_1'));
-    expect(tester.getCenter(indicator).dx, tester.getCenter(item1).dx);
-
-    // Tap History — mid-animation the circle is between the two items.
-    await tester.tap(item0);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    final midDx = tester.getCenter(indicator).dx;
-    expect(midDx, greaterThan(tester.getCenter(item0).dx));
-    expect(midDx, lessThan(tester.getCenter(item1).dx));
-
-    // Once settled it sits over the tapped item.
+    // Back returns to the chat screen.
+    await tester.tap(find.byKey(const Key('page_back_button')));
     await tester.pumpAndSettle();
-    expect(tester.getCenter(indicator).dx, tester.getCenter(item0).dx);
+    expect(find.text('Hi, Name'), findsOneWidget);
+  });
+
+  testWidgets('Chat top bar opens Profile and back returns to chat', (
+    WidgetTester tester,
+  ) async {
+    await _pumpApp(tester);
+
+    await _loginToChat(tester);
+
+    await tester.tap(find.byKey(const Key('chat_profile_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Rina Tan'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('page_back_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Hi, Name'), findsOneWidget);
   });
 }

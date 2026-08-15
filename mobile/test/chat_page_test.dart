@@ -69,9 +69,13 @@ void main() {
     expect(find.text('Recommended'), findsOneWidget);
     expect(find.text('View Itinerary Details'), findsOneWidget);
 
+    // Pinned top bar: History (left) and Profile (right).
+    expect(find.byKey(const Key('chat_history_button')), findsOneWidget);
+    expect(find.byKey(const Key('chat_profile_button')), findsOneWidget);
+
     // Chat input with a send button.
     expect(find.byType(TextField), findsOneWidget);
-    expect(find.byType(IconButton), findsOneWidget);
+    expect(find.byKey(const Key('chat_send_button')), findsOneWidget);
   });
 
   testWidgets('Selecting a hospital option highlights it', (
@@ -112,7 +116,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'Hello');
     expect(find.text('Hello'), findsOneWidget);
 
-    await tester.tap(find.byType(IconButton));
+    await tester.tap(find.byKey(const Key('chat_send_button')));
     await tester.pump();
 
     expect(find.text('Hello'), findsNothing);
@@ -121,9 +125,8 @@ void main() {
   testWidgets('Itinerary card renders full-width outside the chat bubble', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: ChatPage())),
-    );
+    // ChatPage owns its Scaffold, so pump it directly (no outer wrapper).
+    await tester.pumpWidget(const MaterialApp(home: ChatPage()));
 
     final card = find.byType(ItenaryOptionCard);
     expect(card, findsOneWidget);

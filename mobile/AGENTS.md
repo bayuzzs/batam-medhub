@@ -5,19 +5,23 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
 
 ## Directory structure
 
-- `lib/main.dart` — app entry point. Wraps `MyApp` (a `ConsumerWidget`) in `ProviderScope`; `MaterialApp.router` uses the `appRouterProvider`.
+- `lib/main.dart` — app entry point. Builds a `ProviderContainer`, awaits
+  `authControllerProvider.notifier.restore()` before the first frame (so the
+  app boots straight into the right screen without an auth flicker), then runs
+  `MyApp` under an `UncontrolledProviderScope`. `MaterialApp.router` uses the
+  `appRouterProvider`.
 - `lib/application/` — app-level orchestration / global state (Riverpod). One folder per concern:
   - `lib/application/auth/` — auth state & wiring: `auth_controller.dart`, `providers.dart`
 - `lib/ui/` — feature-based UI. Group screens/widgets by feature, one folder per feature.
-  - `lib/ui/<feature>/` — e.g. `lib/ui/auth/`, `lib/ui/home/`
+  - `lib/ui/<feature>/` — e.g. `lib/ui/auth/`, `lib/ui/chat/`, `lib/ui/history/`,
+    `lib/ui/profile/`, `lib/ui/itinerary/`
   - `lib/ui/core/` — shared app-level things, grouped by concern:
     - `lib/ui/core/theme/` — design tokens: `app_theme.dart`, `app_colors.dart`,
       `app_spacing.dart`, `app_assets.dart`
     - `lib/ui/core/widgets/` — reusable widgets & validation:
       `app_container.dart`, `app_text_field.dart`, `app_validators.dart`,
       `primary_radial_gradient.dart`, `itenary_option_card.dart`, and others
-    - `lib/ui/core/navigation/` — routing & shell: `app_router.dart`,
-      `main_shell.dart`, `app_bottom_nav.dart`
+    - `lib/ui/core/navigation/` — routing: `app_router.dart`
 - `lib/data/` — data layer (no UI imports here)
   - `lib/data/repository/` — data repositories (fetch/sync domain data, abstracts + impls)
   - `lib/data/service/` — services (API/network clients, platform integrations)
@@ -45,19 +49,19 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
     `context.pushLogin()` or `context.goLogin()`.
 - The router is auth-aware: its `redirect` reads `authControllerProvider`. While
   `AuthStatus.restoring` no redirect happens (no flicker to login on boot);
-  authenticated users are pulled from the auth screens into the shell; unauthenticated
-  users are redirected to `/login` away from the shell. `appRouterProvider` calls
+  authenticated users are pulled from the auth screens into the **chat screen**;
+  unauthenticated users are redirected to `/login`. `appRouterProvider` calls
   `router.refresh()` whenever auth state changes.
-- The three bottom-nav destinations (History / New Itinerary / Profile) live in a
-  `StatefulShellRoute.indexedStack` with one `StatefulShellBranch` per tab. The
-  shell Scaffold + `AppBottomNav` live in **`lib/ui/core/navigation/main_shell.dart`**
-  (`MainShell`), which takes a `StatefulNavigationShell` and calls
-  `goBranch` on tab select. Each branch keeps its own state (chat scroll,
-  form input, etc.) across tab switches.
-- Feature pages that are shell destinations return **body content only** (no
-  `Scaffold`/`AppBottomNav`/`_selectTab`) — the shell owns those. When pumping
-  such a page in a widget test, wrap it in a `Scaffold` (e.g.
-  `MaterialApp(home: Scaffold(body: ChatPage()))`).
+- There is **no bottom-nav shell**. The chat screen (`/chat`) is the app's
+  primary authenticated screen; `History` (`/history`), `Profile` (`/profile`),
+  and `Itinerary Journey` (`/itinerary`) are full-screen routes pushed on top of
+  it. Chat owns its own `Scaffold` with a **pinned top bar**: History
+  (top-left) and Profile (top-right), which call `context.pushHistory()` /
+  `context.pushProfile()`. History/Profile/Itinerary each own their `Scaffold`
+  and render a header with a back button (`context.pop()`) that returns to chat.
+- Screens pushed on top of chat own their **full-screen `Scaffold`** (no bottom
+  nav). In widget tests, pump them directly when they own a `Scaffold` (e.g.
+  `MaterialApp(home: ChatPage())`).
 - When adding a route: add its path to `AppRoutes`, a `GoRoute` to `appRouterProvider`,
   and typed helpers to `AppRouterX`.
 - Helper semantics (two behaviors only):
@@ -72,17 +76,20 @@ Auth lives in `lib/application/auth/` (state/wiring), `lib/data/` (repositories,
 services) and `lib/models/` (session/profile DTOs).
 
 - **`AuthController`** (`lib/application/auth/auth_controller.dart`) — a Riverpod
-  `Notifier<AuthState>`. Restores a persisted session on startup, handles
+  `Notifier<AuthState>`. Restores a persisted session on startup (idempotently;
+  `main()` awaits it before the first frame), handles
   login/register/logout, and schedules an access-token refresh just before the JWT
   `exp` claim (`AuthSession.accessExpiresAt`, see the `AuthSessionExpiry` extension
   in `lib/models/auth_session.dart`). `refresh()` shares one in-flight future so
   concurrent callers (timer + Dio 401) only rotate the single-use refresh token
   once; on failure the user is signed out.
 - **`providers.dart`** — DI switch. `kUseFakeBackend = true` (default) uses
-  `FakeAuthRepository` + `InMemoryTokenStore` (no backend / platform storage). Set
-  it to `false` to use the real Dio backend (`AuthRepositoryImpl` + `DioAuthApi`) +
-  `SecureTokenStore`. Override `authRepositoryProvider`/`tokenStoreProvider` in
-  tests to swap implementations.
+  `FakeAuthRepository` + a `shared_preferences`-backed `SharedPreferencesTokenStore`,
+  so the demo session survives a full app restart without a backend or platform
+  secure storage. Set it to `false` to use the real Dio backend
+  (`AuthRepositoryImpl` + `DioAuthApi`) + `SecureTokenStore`
+  (`flutter_secure_storage`). Override `authRepositoryProvider`/`tokenStoreProvider`
+  in tests to swap implementations (e.g. `InMemoryTokenStore`).
 - **`lib/data/service/auth_interceptor.dart`** — Dio interceptor that attaches the
   Bearer access token to non-auth requests and transparently refreshes + retries
   once on a `401`.

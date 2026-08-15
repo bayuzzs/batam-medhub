@@ -79,8 +79,21 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AuthSession?> restore() =>
-      _tokenStore?.readSession() ?? Future.value(null);
+  Future<AuthSession?> restore() async {
+    final store = _tokenStore;
+    if (store == null) {
+      return null;
+    }
+    final session = await store.readSession();
+    // A fresh process (after a full restart) doesn't remember the refresh
+    // tokens it issued in memory, but the persisted session's refresh token is
+    // still the live one. Register it so `refresh()` succeeds after a restart
+    // instead of treating the session as dead and logging the user out.
+    if (session != null) {
+      _issuedRefreshTokens.add(session.refreshToken);
+    }
+    return session;
+  }
 
   AuthSession _buildSession({required String fullName, required String email}) {
     _counter += 1;
@@ -109,9 +122,11 @@ class FakeAuthRepository implements AuthRepository {
     return session;
   }
 
-  /// Minimal HS256-shaped JWT: header + base64url payload with an `exp`
-  /// claim. The signature segment is a fixed placeholder (never verified
-  /// client-side).
+  /// Minimal HS256-shaped JWT: header + base64url payload with `exp` and a
+  /// unique `jti` claim. The signature segment is a fixed placeholder (never
+  /// verified client-side). The `jti` is a microsecond timestamp so rotated
+  /// access tokens are observably different even within the same second or
+  /// after a process restart (the in-memory counter resets).
   String _mintJwt({required int iat, required int exp, required String sub}) {
     final header = _b64('{"alg":"HS256","typ":"JWT"}');
     final payload = _b64(
@@ -121,6 +136,7 @@ class FakeAuthRepository implements AuthRepository {
         'sub': sub,
         'iat': iat,
         'exp': exp,
+        'jti': DateTime.now().microsecondsSinceEpoch,
       }),
     );
     return '$header.$payload.synthetic-signature';

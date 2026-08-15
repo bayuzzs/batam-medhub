@@ -52,6 +52,34 @@ void main() {
       expect(restored, isNotNull);
     });
 
+    test(
+      'refresh succeeds after a restart with the persisted session',
+      () async {
+        final store = InMemoryTokenStore();
+        final repo = FakeAuthRepository(tokenStore: store);
+        final session = await repo.login(
+          email: 'rina.tan@example.test',
+          password: 'x',
+        );
+
+        // Simulate a fresh app process: a new repository instance shares the
+        // same (persisted) token store but has no in-memory knowledge of the
+        // refresh token it previously issued.
+        final restartedRepo = FakeAuthRepository(tokenStore: store);
+
+        final restored = await restartedRepo.restore();
+        expect(restored, isNotNull);
+
+        // Refreshing with the persisted token must succeed, not throw, so a
+        // restart doesn't log the user out when the access token expires.
+        final rotated = await restartedRepo.refresh(
+          refreshToken: restored!.refreshToken,
+        );
+        expect(rotated.accessToken, isNot(session.accessToken));
+        expect(rotated.refreshToken, isNot(session.refreshToken));
+      },
+    );
+
     test('logout clears the persisted session', () async {
       final store = InMemoryTokenStore();
       final repo = FakeAuthRepository(tokenStore: store);

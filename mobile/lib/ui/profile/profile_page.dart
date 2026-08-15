@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'package:mobile/application/auth/providers.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
+import 'package:mobile/ui/core/theme/app_spacing.dart';
 import 'package:mobile/ui/core/widgets/app_container.dart';
+import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 
-/// Profile screen (bottom nav destination 2).
+/// Profile screen, pushed full-screen from the chat top bar.
 ///
-/// Shown inside [MainShell]; the shell owns the [Scaffold] and bottom nav.
-/// Displays the signed-in patient's profile and a sign-out action.
+/// Displays the signed-in patient's profile and a sign-out action. Back
+/// returns to the chat screen.
 class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key});
 
@@ -18,68 +22,115 @@ class ProfilePage extends ConsumerWidget {
     final auth = ref.watch(authControllerProvider);
     final session = auth.session;
 
-    return SafeArea(
-      child: AppContainer(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 24),
-            Text('Profile', style: theme.textTheme.headlineMedium),
-            const SizedBox(height: 24),
-            if (session != null) ...[
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 32,
-                    backgroundColor: theme.colorScheme.primaryContainer,
-                    child: Text(
-                      session.profile.fullName.isNotEmpty
-                          ? session.profile.fullName[0].toUpperCase()
-                          : '?',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+    return Scaffold(
+      body: Stack(
+        children: [
+          const PrimaryRadialGradient(startOpacity: 0.20),
+          SafeArea(
+            child: Column(
+              children: [
+                // Header with back button and screen title.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.screen,
+                    8,
+                    AppSpacing.screen,
+                    8,
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
+                  child: Row(
+                    children: [
+                      IconButton(
+                        key: const Key('page_back_button'),
+                        onPressed: () => context.pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.primary.withValues(
+                            alpha: 0.12,
+                          ),
+                          foregroundColor: AppColors.heading,
+                        ),
+                        icon: const Icon(LucideIcons.chevronLeft),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('Profile', style: theme.textTheme.titleLarge),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: AppContainer(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          session.profile.fullName,
-                          style: theme.textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          session.profile.email,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                        const SizedBox(height: 24),
+                        if (session != null) ...[
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 32,
+                                backgroundColor:
+                                    theme.colorScheme.primaryContainer,
+                                child: Text(
+                                  session.profile.fullName.isNotEmpty
+                                      ? session.profile.fullName[0]
+                                            .toUpperCase()
+                                      : '?',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: theme.colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      session.profile.fullName,
+                                      style: theme.textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      session.profile.email,
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
+                          const SizedBox(height: 24),
+                          _InfoTile(
+                            icon: LucideIcons.creditCard,
+                            label: 'Preferred currency',
+                            value: session.profile.preferredCurrency
+                                .toUpperCase(),
+                          ),
+                        ] else
+                          Text(
+                            'You are not signed in.',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                        const Spacer(),
+                        FilledButton.tonalIcon(
+                          onPressed: () => ref
+                              .read(authControllerProvider.notifier)
+                              .logout(),
+                          icon: const Icon(LucideIcons.logOut),
+                          label: const Text('Log Out'),
                         ),
+                        const SizedBox(height: 24),
                       ],
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              _InfoTile(
-                icon: LucideIcons.creditCard,
-                label: 'Preferred currency',
-                value: session.profile.preferredCurrency.toUpperCase(),
-              ),
-            ] else
-              Text('You are not signed in.', style: theme.textTheme.bodyLarge),
-            const Spacer(),
-            FilledButton.tonalIcon(
-              onPressed: () =>
-                  ref.read(authControllerProvider.notifier).logout(),
-              icon: const Icon(LucideIcons.logOut),
-              label: const Text('Log Out'),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

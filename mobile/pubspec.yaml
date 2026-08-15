@@ -2,7 +2,7 @@ name: mobile
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -57,13 +57,13 @@ dev_dependencies:
   freezed: ^4.0.0-dev.3
   json_serializable: ^6.14.1
   build_runner: ^2.15.1
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
@@ -136,3 +136,30 @@ flutter_native_splash:
     color: "#FFFFFF"
     image: assets/adaptive_fg.png
     icon_background_color: "#FFFFFF"
+
+# Customizes the app launcher icon on each platform.
+# After changing this config, regenerate with:
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/regular_icon.png"
+  min_sdk_android: 21
+  # iOS App Store rejects icons with alpha; the source has transparency.
+  remove_alpha_ios: true
+
+  # Android 8+ adaptive icon: transparent foreground on a solid background,
+  # plus a monochrome variant for themed icons.
+  adaptive_icon_foreground: "assets/adaptive_fg.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_monochrome: "assets/monochrome_fg.png"
+
+  web:
+    generate: true
+    image_path: "assets/regular_icon.png"
+    background_color: "#FFFFFF"
+    theme_color: "#28D1D0"
+
+  macos:
+    generate: true
+    image_path: "assets/regular_icon.png"

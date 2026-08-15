@@ -96,12 +96,7 @@ class ItenaryOptionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      providerName,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    Text(providerName, style: theme.textTheme.titleMedium),
                     const SizedBox(height: 6),
                     Text(
                       serviceName,
@@ -308,10 +303,7 @@ class _PriceSection extends StatelessWidget {
             ),
             Text(
               '$price/person',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: AppColors.primary,
-              ),
+              style: theme.textTheme.headlineSmall?.copyWith(),
             ),
           ],
         ),
