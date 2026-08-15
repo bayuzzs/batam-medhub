@@ -1,14 +1,16 @@
 # Batam MedHub API Contracts
 
-Status: frozen implementation contract v0.1
+Status: core implementation contract v0.2; provider implementation contract v0.1
 
 ## Contracts
 
-- `openapi.yaml` defines the patient-facing core API and the provider-authenticated disruption-ingestion operation.
+- `openapi.yaml` defines backend-owned patient auth/profile operations, the patient-facing orchestration API, and the provider-authenticated disruption-ingestion operation.
 - `provider-openapi.yaml` defines the backend-to-provider protocol implemented by the hospital, ferry, hotel, and internal transport services.
 - `examples/core/` and `examples/provider/` contain payload-only golden examples referenced by the contracts.
 
 Both contracts use OpenAPI 3.1. Money is represented in integer minor units using each currency's ISO 4217 exponent and code. Schedule instants are UTC and retain IANA time zones. All example data is synthetic.
+
+The core auth contract uses email/password registration, short-lived HS256 access JWTs, rotating opaque refresh tokens, and stored session revocation. The mobile client must keep tokens in secure storage, never log them, send both current credentials for a profile update, and replace both tokens returned by that update.
 
 ## Ownership
 

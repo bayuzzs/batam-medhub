@@ -1,6 +1,6 @@
 # Batam MedHub Logical ERD
 
-Status: contract draft v0.1
+Status: contract draft v0.2
 Scope: first hackathon vertical slice
 
 ## Reading this document
@@ -11,7 +11,60 @@ All internal IDs are UUIDs. Provider-owned external IDs remain opaque strings. A
 
 ## Core PostgreSQL
 
-The core database is the Batam MedHub system of record for planning, orchestration, journeys, and disruption recovery. It stores provider snapshots and external references, not live provider inventory.
+The core database is the Batam MedHub system of record for patient identity, sessions, planning, orchestration, journeys, and disruption recovery. It stores provider snapshots and external references, not live provider inventory.
+
+### Patient identity and auth sessions
+
+```mermaid
+erDiagram
+    direction LR
+
+    PATIENT ||--o{ AUTH_SESSION : authenticates_with
+    PATIENT ||--o{ TRIP_REQUEST : creates
+    PATIENT ||--o{ JOURNEY : owns
+
+    PATIENT {
+        uuid id PK
+        string email_normalized UK
+        string password_hash
+        string full_name
+        string preferred_currency
+        string status
+        bool synthetic
+        datetime created_at
+        datetime updated_at
+    }
+
+    AUTH_SESSION {
+        uuid id PK
+        uuid patient_id FK
+        string refresh_token_hash UK
+        uuid replaced_by_session_id FK
+        datetime expires_at
+        datetime revoked_at
+        datetime created_at
+        datetime last_used_at
+    }
+
+    TRIP_REQUEST {
+        uuid id PK
+        uuid patient_id FK
+    }
+
+    JOURNEY {
+        uuid id PK
+        uuid patient_id FK
+    }
+```
+
+Important constraints:
+
+- `Patient.email_normalized` is the trimmed lowercase email and is unique.
+- `Patient.preferred_currency` is initially `SGD` or `IDR`; unsupported static-FX currencies are rejected.
+- Password plaintext is never stored. `password_hash` is a bcrypt verifier produced only after enforcing the 8–72 UTF-8 byte contract.
+- `AuthSession.refresh_token_hash` stores SHA-256 output for a random opaque token, never the raw credential.
+- Refresh rotation locks and revokes the current session, creates one replacement, and links `replaced_by_session_id` in one transaction.
+- Access JWT `sub` equals `Patient.id`; `sid` equals an active `AuthSession.id`. Logout revocation therefore invalidates access-token use at middleware.
 
 ### Reference data and planning
 
@@ -20,6 +73,7 @@ erDiagram
     direction LR
 
     PROVIDER ||--o{ PROVIDER_CREDENTIAL : authenticates_with
+    PATIENT ||--o{ TRIP_REQUEST : creates
     PROVIDER ||--o{ PROVIDER_CAPABILITY : publishes
     MEDICAL_SERVICE ||--o{ PROVIDER_CAPABILITY : maps_to
     MEDICAL_SERVICE o|..o{ TRIP_REQUEST : resolves
@@ -65,7 +119,7 @@ erDiagram
 
     TRIP_REQUEST {
         uuid id PK
-        string patient_subject
+        uuid patient_id FK
         string status
         uuid medical_service_id FK
         string requested_service_text
@@ -142,6 +196,8 @@ erDiagram
     direction LR
 
     TRIP_REQUEST ||--o| JOURNEY : becomes
+    PATIENT ||--o{ TRIP_REQUEST : creates
+    PATIENT ||--o{ JOURNEY : owns
     TRIP_REQUEST ||--o{ RESERVATION : coordinates
     PLAN_ITEM ||--o| RESERVATION : books
     PROVIDER ||--o{ RESERVATION : owns_externally
@@ -152,7 +208,7 @@ erDiagram
 
     TRIP_REQUEST {
         uuid id PK
-        string patient_subject
+        uuid patient_id FK
         string status
         uuid selected_plan_option_id FK
     }
@@ -188,7 +244,7 @@ erDiagram
     JOURNEY {
         uuid id PK
         uuid trip_request_id FK, UK
-        string patient_subject
+        uuid patient_id FK
         string status
         int current_version_number
         datetime activated_at
@@ -225,6 +281,7 @@ erDiagram
 Important constraints:
 
 - `TripRequest` has zero or one `Journey`; a journey is created only after all required reservations confirm.
+- `TripRequest.patient_id` and `Journey.patient_id` must match, and every patient route filters by the authenticated JWT `sub`.
 - `Reservation.journey_id` is nullable while confirmation is in progress.
 - `(journey_id, version_number)` and `(itinerary_version_id, sequence_number)` are unique.
 - A partial unique constraint permits only one `ACTIVE` itinerary version per journey.

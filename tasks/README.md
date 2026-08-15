@@ -37,13 +37,14 @@ Paste the corresponding copy-paste prompt from `tasks/backend.md` or `tasks/prov
 
 ## Integration order
 
-1. Freeze and commit the architecture and OpenAPI v0.1 contracts.
+1. Freeze and commit core OpenAPI v0.2 and provider OpenAPI v0.1 with their architecture documents.
 2. Start both workers from that same commit.
 3. Integrate runtime, migrations, health checks, and deterministic seeds.
-4. Integrate provider search and reservation operations.
-5. Complete planning and itinerary v1 before adding Workers AI.
-6. Add Workers AI at the language boundary.
-7. Complete disruption recovery and itinerary v2.
-8. Harden reset, setup, documentation, and the demo script.
+4. Complete backend-owned patient registration, login, refresh, logout, and profile operations.
+5. Integrate provider search and reservation operations.
+6. Complete planning and itinerary v1 before adding Workers AI.
+7. Add Workers AI at the language boundary.
+8. Complete disruption recovery and itinerary v2.
+9. Harden reset, setup, documentation, and the demo script.
 
 Automated test suites are deferred by project decision. OpenAPI validation, builds, migrations on empty databases, Compose health checks, and repeatable manual smoke flows remain completion gates.

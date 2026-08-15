@@ -1,6 +1,6 @@
 # Batam MedHub — Project Understanding
 
-Status: contract-frozen v0.1; implementation not started
+Status: core contract v0.2 and provider contract v0.1; core/provider implementation not started
 
 Last reviewed: 15 August 2026
 
@@ -56,7 +56,7 @@ The four provider categories are represented by standalone headless Go applicati
 
 | Participant | Role in Batam MedHub |
 |---|---|
-| Patient or caregiver | Describes a planned medical trip, corrects extracted preferences, reviews plan options, approves logistics, and follows the active itinerary. |
+| Patient or caregiver | Registers or logs in, maintains a reference-currency preference, describes a planned medical trip, corrects extracted preferences, reviews plan options, approves logistics, and follows the active itinerary. |
 | Hospital service | Exposes synthetic services and slots and responds to search, hold, confirm, and release operations. Its actor can submit provider-authored medical schedule changes. |
 | Ferry service | Exposes synthetic sailings, cutoffs, capacity, and booking operations. Its actor can submit delays, schedule changes, or cancellations. |
 | Hotel service | Exposes synthetic rooms, occupancy, accessibility, stay coverage, and booking operations. Its actor can submit room or reservation problems. |
@@ -72,11 +72,11 @@ The intended monorepo has three areas:
 
 | Directory | Ownership and intended responsibility | Current state |
 |---|---|---|
-| `mobile/` | Patient-facing client, owned by another team member. This workstream must not modify it unless explicitly requested later. | Empty. |
-| `backend/` | Core journey orchestration, intent validation, provider normalization, deterministic planning, booking, itinerary, and disruption handling. | Contains an untracked `go.mod` declaring module `batam-medhub` with Go `1.26.5` and workstream instructions; application code is not implemented. |
+| `mobile/` | Patient-facing client, owned by another team member. This workstream must not modify it unless explicitly requested later. | Flutter UI includes onboarding, login, and registration forms; auth integration is not implemented. |
+| `backend/` | Patient auth, core journey orchestration, intent validation, provider normalization, deterministic planning, booking, itinerary, and disruption handling. | Contains a tracked `go.mod` declaring module `batam-medhub` with Go `1.26.5` and workstream instructions; application code is not implemented. |
 | `providers/` | Parent for four standalone headless Go provider applications—hospital, ferry, hotel, and internal transport—run together through Compose. | Contains workstream instructions only; provider application code is not implemented. The directory name is plural. |
 
-The repository now has draft-v0.1 architecture documents, two OpenAPI contracts, golden JSON contract examples, and Codex workstream briefs. It still has no application source files, database migrations, runtime fixtures, tests, deployment configuration, or environment example. The tracked root `readme.md` still contains only `Hello World`; the new foundation files are not yet committed.
+The repository now has v0.2 core architecture/auth contracts, the v0.1 provider contract, golden JSON examples, and Codex workstream briefs. Backend/provider application source, migrations, runtime fixtures, tests, deployment configuration, and environment examples are not implemented yet.
 
 Nothing described below should therefore be read as already implemented.
 
@@ -110,6 +110,7 @@ flowchart LR
 
     subgraph BACKEND[Backend orchestration]
         API[Gin Backend API]
+        API --> AUTH[Patient auth and sessions]
         API --> INTENT[Intent validation]
         API --> ADAPTERS[Provider-specific adapters]
         API --> EVENTS[Event validation and deduplication]
@@ -132,7 +133,7 @@ flowchart LR
     API --> CORE_DB
 ```
 
-The core backend remains a Go modular monolith with one system of record for Batam MedHub journey state. The four provider processes are external-system mocks with independent HTTP and persistence boundaries; they do not own Batam MedHub's core orchestration domain.
+The core backend remains a Go modular monolith with one system of record for patient accounts, auth sessions, and Batam MedHub journey state. The four provider processes are external-system mocks with independent HTTP and persistence boundaries; they do not own Batam MedHub's core orchestration domain.
 
 The backend remains the source of truth for Batam MedHub journey state. Mobile calls the backend contract. The backend calls provider services through provider-specific adapters, and provider actors submit disruptions through an authenticated backend route. The four providers share one PostgreSQL server and named volume, but each owns a separate logical database and database credential for its operational data. No service accesses another provider's database or the core database directly.
 
@@ -140,7 +141,7 @@ PostgreSQL is the confirmed persistence technology for the core backend and all 
 
 ## 7. Initial journey flow
 
-The intended end-to-end planning flow is:
+The patient first registers or logs in through the core backend. The backend issues a short-lived access JWT and a rotating opaque refresh token backed by a stored session. The intended end-to-end planning flow after authentication is:
 
 1. The patient submits a natural-language request for any provider-authored medical service available in the active catalog.
 2. Cloudflare Workers AI extracts a structured intent object.
@@ -175,7 +176,7 @@ CONFIRMING → ACTIVE | CONFIRMATION_FAILED | MANUAL_REVIEW
 
 ## 8. Structured-intent contract v0.1
 
-The semantic resolution model is frozen for OpenAPI v0.1:
+The structured-intent resolution model remains schema version v0.1 inside core OpenAPI v0.2:
 
 ```json
 {
@@ -302,7 +303,7 @@ hold hospital
 → confirm all
 ```
 
-If one operation fails, newly created holds are released. Confirmed cleanup produces `CONFIRMATION_FAILED`; a timeout or another uncertain release outcome produces `MANUAL_REVIEW`, retains all external references, and never declares a journey active. Every mutating operation needs an idempotency key so repeated requests or double-clicks cannot create duplicate trips, reservations, events, or itineraries.
+If one operation fails, newly created holds are released. Confirmed cleanup produces `CONFIRMATION_FAILED`; a timeout or another uncertain release outcome produces `MANUAL_REVIEW`, retains all external references, and never declares a journey active. Every contracted orchestration mutation needs an idempotency key so retries or double-clicks cannot create duplicate trips, reservations, events, or itineraries. Auth uses unique email, atomic session rotation, and idempotent logout instead of storing token responses in generic replay records.
 
 The hackathon implementation may simulate this synchronously, but its visible state transitions should still be honest.
 
@@ -429,17 +430,24 @@ backend/migrations/
 providers/migrations/{hospital,ferry,hotel,transport}/
 ```
 
-The minimal core ERD should cover providers and keys, the supported medical-service catalog and provider capability mappings, trip requests, plan options and normalized offer snapshots, journeys and itinerary versions, reservations, provider events and actor snapshots, disruption cases, replan options, and static exchange rates. Separate provider data models cover their operational offers, slots, sailings, rooms, vehicle availability, capacity, holds, and reservations. Those records remain provider-owned; the core database must not become a second live inventory source of truth.
+The minimal core ERD covers patients and auth sessions, providers and keys, the supported medical-service catalog and provider capability mappings, trip requests, plan options and normalized offer snapshots, journeys and itinerary versions, reservations, provider events and actor snapshots, disruption cases, replan options, and static exchange rates. Separate provider data models cover their operational offers, slots, sailings, rooms, vehicle availability, capacity, holds, and reservations. Those records remain provider-owned; the core database must not become a second live inventory source of truth.
 
 The confirmed stack is Gin for HTTP, GORM for PostgreSQL data access and transactions, and `golang-migrate/migrate` for versioned SQL migrations in both the core backend and all four provider services. Each datastore has its own SQL migration history and schema authority; runtime GORM `AutoMigrate` must not create or change tables.
 
 The control plane owns both contracts under `specs/**`; implementation workers consume them read-only. `specs/openapi.yaml` is the mobile-facing Batam MedHub API, while `specs/provider-openapi.yaml` documents the backend-to-provider mock protocol so the four Go services can be implemented consistently.
 
-OpenAPI v0.1 defines the following minimal patient and orchestration operations:
+Core OpenAPI v0.2 defines the following minimal patient and orchestration operations:
 
 ```text
 GET    /healthz
 GET    /readyz
+POST   /v1/auth/register
+POST   /v1/auth/login
+POST   /v1/auth/refresh
+POST   /v1/auth/logout
+GET    /v1/profile
+PATCH  /v1/profile
+
 GET    /v1/medical-services
 POST   /v1/trip-requests
 PATCH  /v1/trip-requests/{id}/intent
@@ -458,7 +466,7 @@ POST   /v1/demo/reset
 
 `specs/provider-openapi.yaml` defines backend-to-provider search, hold, confirm, lookup, and release operations. Provider-authored disruptions are defined only in the core backend contract because actors submit them directly to `POST /v1/provider/disruptions`.
 
-The aggregate distinction is: `TripRequest` represents the planning request before confirmation, while `Journey` represents the confirmed, versioned journey. OpenAPI v0.1 is the contract authority for API naming.
+The aggregate distinction is: `Patient` owns identity and sessions, `TripRequest` represents the planning request before confirmation, and `Journey` represents the confirmed, versioned journey. Core OpenAPI v0.2 is the contract authority for mobile-facing API naming; provider OpenAPI remains v0.1.
 
 ## 15. Safety, privacy, and cross-border rules
 
@@ -468,12 +476,14 @@ The aggregate distinction is: `TripRequest` represents the planning request befo
 - Do not log raw medical prompts to public analytics services.
 - Send each partner only the minimum operational data required for its role.
 - Keep API keys and model credentials in environment variables.
+- Keep the JWT signing secret separate from provider and demo secrets; require at least 32 random bytes.
+- Never persist or log password plaintext, access tokens, or raw refresh tokens. Store bcrypt password verifiers and SHA-256 refresh-token hashes, and return credentials with `Cache-Control: no-store`.
 - Treat all LLM and provider payloads as untrusted input.
 - Store instants in UTC and retain the source IANA time zone. Singapore uses `Asia/Singapore` (UTC+8), while Batam uses `Asia/Jakarta` (UTC+7).
 - Display local times and zones explicitly to avoid ambiguous itineraries.
 - Store money as an integer minor-unit amount using that currency's ISO 4217 exponent plus an ISO currency code, never as floating point.
 - Preserve the provider's original amount and currency as source-of-truth money.
-- Read the patient's display-currency preference from a verified JWT claim. Backend responses should return both source money and converted display money, including the FX rate source, rate timestamp, and an estimated/reference indicator.
+- Read the patient's `SGD` or `IDR` display-currency preference from a verified JWT claim that must match the persisted profile. Profile updates require access and refresh credentials for the same session, then rotate it and return a replacement token pair so a stolen access token cannot mint a refresh credential. Other sessions with stale claims are rejected until refreshed. Backend responses should return both source money and converted display money, including the FX rate source, rate timestamp, and an estimated/reference indicator.
 - Retain offer source, freshness, expiry, and external reference.
 - Never let AI rewrite provider-authored clinical or preparation instructions.
 - A production pilot would require real consent, access control, encryption, audit, retention, legal review, and partner agreements; the hackathon must not claim these are complete.
@@ -489,7 +499,8 @@ The following decisions are now confirmed:
 - One canonical disruption engine accepts events from hospital, ferry, hotel, and the internal transport provider.
 - Medical records, post-care follow-up, and multilingual product support are next-phase capabilities.
 - A confirmed journey uses state `ACTIVE`.
-- The patient's verified JWT includes a reference-currency preference. The backend converts prices for display while preserving original provider money.
+- Patient registration, email/password login, refresh rotation, logout, and profile access are owned by the core backend. Password reset, email verification, MFA, and social login are deferred.
+- The patient's verified JWT includes stable patient/session IDs and a reference-currency preference. The backend converts prices for display while preserving original provider money.
 - Transport is an internal provider.
 - Provider authentication uses provider-specific secret keys.
 - Hospital, ferry, hotel, and transport are four standalone headless Go services under `providers/docker-compose.yml`.
@@ -504,6 +515,7 @@ The following decisions are now confirmed:
 
 ### First feature-complete vertical slice
 
+- Backend-owned patient registration, login, rotating refresh sessions, logout, and profile currency update.
 - Active medical-service catalog and unsupported-service response.
 - Natural-language request to validated structured intent.
 - Missing-field clarification and safe out-of-scope behavior.
@@ -516,10 +528,11 @@ The following decisions are now confirmed:
 - Provider disruption route that can be invoked manually with the relevant provider secret.
 - One event type from every provider category through the shared disruption pipeline.
 - One polished recovery flow that books provider-only `FOLLOWUP_OBSERVATION` inventory through normal search/hold/confirm operations and produces itinerary v2.
-- Deterministic demo reset and visible synthetic-data labels.
+- Deterministic demo reset that removes synthetic patients, revokes sessions, resets orchestration/provider state, and allows the golden registration to be replayed with visible synthetic-data labels.
 
 ### Next phase
 
+- Password recovery, email verification, MFA, or social login.
 - Medical records or document upload.
 - Readiness checklist, consent, or a role-based Care Pass.
 - Post-care follow-up workflow.
@@ -573,6 +586,7 @@ The provided judging preference is:
 Technical execution has the highest single weight. The implementation should therefore make the engineering evidence visible:
 
 - OpenAPI-first contracts and consistent domain vocabulary.
+- Backend-owned auth sessions with hashed credentials, bounded login rates, refresh rotation, and revocation.
 - PostgreSQL persistence across the core and provider boundaries rather than disconnected UI state.
 - Provider-specific adapters and a canonical provider-event envelope.
 - Deterministic planning and impact analysis; AI remains at the language boundary.
@@ -582,7 +596,7 @@ Technical execution has the highest single weight. The implementation should the
 
 RAG or a broad autonomous agent should not be added merely to match a judging keyword. Availability, prices, inventory, bookings, and schedules are transactional structured data. The technical explanation should show why structured LLM output plus deterministic tool boundaries is safer and more appropriate.
 
-Per the project owner's sequencing decision, automated tests are deferred until the application features are ready. Compilation, migration execution, OpenAPI validation, and repeatable manual smoke flows should still remain feature-completion gates; the later test phase should focus first on planner constraints, money conversion, provider authentication, idempotency, and itinerary version changes.
+Per the project owner's sequencing decision, automated tests are deferred until the application features are ready. Compilation, migration execution, OpenAPI validation, and repeatable manual smoke flows should still remain feature-completion gates; the later test phase should focus first on auth rotation/revocation, planner constraints, money conversion, provider authentication, idempotency, and itinerary version changes.
 
 ## 19. Initial demo catalog
 
@@ -593,16 +607,16 @@ The v0.1 deterministic seed starts with MCU Basic, MCU Comprehensive, Dental Che
 - The latest brief overrides older research recommendations.
 - `mobile/` remains untouched.
 - The backend is a Go modular monolith and the sole orchestration source of truth; the control plane owns `specs/`, which implementation workers consume read-only.
-- The domain model, ERD, state machines, and both OpenAPI v0.1 contracts are frozen before implementation workstreams branch.
+- The domain model, ERD, state machines, core OpenAPI v0.2, and provider OpenAPI v0.1 are frozen before implementation workstreams branch.
 - Gin handles HTTP, GORM handles data access, and `golang-migrate/migrate` SQL files are the only schema-migration authority.
-- Core PostgreSQL stores catalog, planning, booking, journey, provider-event, disruption, and reference-exchange-rate state.
+- Core PostgreSQL stores patient accounts, auth sessions, catalog, planning, booking, journey, provider-event, disruption, and reference-exchange-rate state.
 - Provider secrets resolve provider identity and role server-side.
 - Four standalone Gin provider services run through `providers/docker-compose.yml`; they share one PostgreSQL server while each owns a separate logical database, and their routine booking behavior is automatic and seed-backed.
 - The internal transport provider uses the same integration principles as the other provider categories.
 - One generic event pipeline supports all provider sources; one path is polished for the presentation.
 - Static exchange rates are stored with source and timestamp metadata and frozen into confirmed itinerary price snapshots.
 - All data and confirmations are synthetic and visibly labeled.
-- Records, post-care workflows, multilingual behavior, payments, real integrations, and production compliance controls remain next-phase work.
+- Password recovery, email verification, MFA, social login, records, post-care workflows, multilingual behavior, payments, real integrations, and production compliance controls remain next-phase work.
 - Feature implementation precedes the dedicated automated-testing phase.
 
 ## 21. Sources consulted

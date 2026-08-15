@@ -1,6 +1,6 @@
 # Batam MedHub State Machines
 
-Status: contract draft v0.1
+Status: contract draft v0.2
 Scope: first hackathon vertical slice
 
 ## Conventions
@@ -8,8 +8,34 @@ Scope: first hackathon vertical slice
 - State names are uppercase in APIs and databases; diagrams use title case for readability.
 - A transition occurs only after its guard passes.
 - Invalid transitions return a conflict and do not partially mutate state.
-- Retried mutating requests with the same idempotency key return the original outcome.
+- Retried orchestration mutations with the same idempotency key return the original outcome. Auth uses unique email, atomic refresh rotation, and idempotent logout instead of generic response replay.
 - Provider HTTP calls are never enclosed in a core PostgreSQL transaction.
+
+## Patient auth-session lifecycle
+
+Each register or login creates one stored `AuthSession`. Access JWTs reference it with `sid`; they are accepted only while the session is active. A refresh creates a replacement row instead of extending or rewriting the old session.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Active: register or login
+    Active --> Rotated: refresh or profile update succeeds
+    Active --> Revoked: logout
+    Active --> Expired: expiry reached
+    Rotated --> [*]
+    Revoked --> [*]
+    Expired --> [*]
+```
+
+| From | Command and guard | To | Required action |
+|---|---|---|---|
+| New account or valid credentials | Register or login passes validation and bounded rate checks | `ACTIVE` | Persist one session hash and issue access/refresh credentials with `Cache-Control: no-store`. |
+| `ACTIVE` | Refresh hash matches, session is unexpired/unrevoked, and row lock is acquired | `ROTATED` | Revoke old row, create one replacement `ACTIVE` session, and issue a new token pair atomically. |
+| `ACTIVE` | Authenticated profile update supplies a refresh token whose hash belongs to the JWT `sid`, passes validation, and locks that row | `ROTATED` | Persist profile, revoke old row, and create one replacement session/token pair atomically. |
+| `ACTIVE` | Logout presents its refresh token | `REVOKED` | Revoke the session. A well-formed unknown or already inactive token still returns `204`. |
+| `ACTIVE` | Session expiry is reached | `EXPIRED` | Reject both refresh and any access JWT carrying this `sid`. Lazy expiry evaluation is sufficient. |
+
+Only one concurrent refresh of the same token can succeed. Invalid login credentials use one generic response regardless of whether the email exists. Updating a profile uses the same rotation transition and returns a replacement token pair. Bearer middleware rejects an old currency claim on any other active session; that device can refresh its own session to obtain the current claim.
 
 ## Trip-request workflow
 
@@ -50,7 +76,7 @@ stateDiagram-v2
 | `PARSING_INTENT` | Resolution is `MATCHED`, required fields exist, and catalog service is active | `PLANNING` | Increment planning revision and query provider searches with bounded timeouts. |
 | `PLANNING` | Hard filtering leaves no feasible combination | `NO_MATCH` | Persist the reason categories without inventing availability. |
 | `PLANNING` | One or two feasible options exist | `PLAN_READY` | Persist ranked option and offer snapshots with expiry. |
-| `PLAN_READY` | Patient approves an unexpired option owned by the same JWT subject | `CONFIRMING` | Lock selection and begin the booking saga. |
+| `PLAN_READY` | Patient approves an unexpired option owned by the same patient ID as JWT `sub` | `CONFIRMING` | Lock selection and begin the booking saga. |
 | `PLAN_READY` | Any required offer expired before approval | `PLANNING` | Invalidate stale options and create a new revision. |
 | `CONFIRMING` | Every required reservation confirmed | `ACTIVE` | Atomically create the journey, itinerary v1, and links to core reservation records. |
 | `CONFIRMING` | A hold/confirm fails and every compensation result is known | `CONFIRMATION_FAILED` | Persist the failed outcome; no journey is created. |

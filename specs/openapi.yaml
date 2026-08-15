@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Batam MedHub Core API
-  version: 0.1.0
-  summary: Patient journey orchestration and provider-authored disruption contract.
+  version: 0.2.0
+  summary: Patient authentication, journey orchestration, and provider-authored disruption contract.
   description: |
-    The Batam MedHub core API turns a supported planned-care request into a
-    feasible, confirmable, and recoverable cross-provider journey.
+    The Batam MedHub core API owns patient accounts and sessions, then turns a
+    supported planned-care request into a feasible, confirmable, and recoverable
+    cross-provider journey.
 
     Cloudflare Workers AI is used only to extract structured intent. The core
     validates model output, catalog membership, provider availability, journey
@@ -24,6 +25,10 @@ servers:
 tags:
   - name: Health
     description: Process and datastore health.
+  - name: Authentication
+    description: Patient registration, login, refresh-session rotation, and logout.
+  - name: Profile
+    description: The authenticated patient's profile and reference-currency preference.
   - name: Catalog
     description: Supported medical-service catalog.
   - name: Trip Requests
@@ -79,6 +84,252 @@ paths:
                 checked_at: "2026-08-15T08:00:00Z"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/auth/register:
+    post:
+      tags: [Authentication]
+      operationId: registerPatient
+      summary: Register a patient and create an authenticated session.
+      description: |
+        Email is trimmed and normalized to lowercase before uniqueness checks.
+        `preferred_currency` defaults to `SGD` when omitted. `confirm_password`
+        is a mobile-only validation field and must not be sent to this operation.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterPatientRequest"
+            examples:
+              synthetic_patient:
+                externalValue: ./examples/core/auth-register-request.json
+      responses:
+        "201":
+          description: Patient registered and session created.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              description: Relative URL of the current patient's profile.
+              schema:
+                type: string
+              example: /v1/profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+              examples:
+                registered:
+                  externalValue: ./examples/core/auth-session.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: loginPatient
+      summary: Authenticate a patient and create a new session.
+      description: Invalid email and invalid password return the same generic credential error.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              synthetic_patient:
+                externalValue: ./examples/core/auth-login-request.json
+      responses:
+        "200":
+          description: Credentials accepted and session created.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+              examples:
+                authenticated:
+                  externalValue: ./examples/core/auth-session.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshPatientSession
+      summary: Rotate a refresh token and issue a new token pair.
+      description: |
+        A refresh token is single-use. Rotation revokes the presented session
+        and creates its replacement atomically; concurrent reuse has at most
+        one successful request.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+            examples:
+              synthetic_session:
+                externalValue: ./examples/core/auth-refresh-request.json
+      responses:
+        "200":
+          description: Refresh token rotated and replacement session issued.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+              examples:
+                rotated:
+                  externalValue: ./examples/core/auth-refresh-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutPatient
+      summary: Revoke the session represented by a refresh token.
+      description: |
+        This operation is idempotent. A well-formed token that is unknown,
+        expired, rotated, or already revoked still returns `204` and does not
+        reveal token state.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+            examples:
+              synthetic_session:
+                externalValue: ./examples/core/auth-logout-request.json
+      responses:
+        "204":
+          description: Session is revoked or was already inactive.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/profile:
+    get:
+      tags: [Profile]
+      operationId: getPatientProfile
+      summary: Retrieve the authenticated patient's profile.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Current patient profile.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatientProfile"
+              examples:
+                synthetic_patient:
+                  externalValue: ./examples/core/patient-profile.json
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Profile]
+      operationId: updatePatientProfile
+      summary: Update the patient's name or reference-currency preference.
+      description: |
+        The request must present both the access JWT and the current refresh
+        token for the same `sid`. The backend verifies both credentials, persists
+        the profile, rotates that session, and returns a replacement token pair.
+        The previous credentials are revoked so a stolen access token cannot mint
+        a refresh token and `preferred_currency` cannot remain valid with a stale claim.
+      security:
+        - PatientBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePatientProfileRequest"
+            examples:
+              use_idr:
+                externalValue: ./examples/core/patient-profile-update-request.json
+      responses:
+        "200":
+          description: Profile updated, prior session revoked, and replacement token pair issued.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+              examples:
+                updated:
+                  externalValue: ./examples/core/patient-profile-update-response.json
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /v1/medical-services:
     get:
@@ -534,12 +785,14 @@ paths:
     post:
       tags: [Demo]
       operationId: resetDemoData
-      summary: Reset synthetic core orchestration state to the default scenario.
+      summary: Reset synthetic patient/session and orchestration state to the default scenario.
       description: |
-        This operation resets only the core datastore and must be disabled
-        outside the hackathon demo environment. The repository-level demo
-        reset procedure separately invokes the provider reset/reseed command;
-        the core never connects to provider databases.
+        This operation revokes sessions, removes synthetic patient accounts,
+        restores reference data, and clears core orchestration state. The demo
+        then exercises registration using the golden synthetic patient. This
+        operation must be disabled outside the hackathon environment. The
+        repository-level reset separately invokes provider reset/reseed; the
+        core never connects to provider databases.
       security:
         - DemoSecret: []
       parameters:
@@ -553,7 +806,7 @@ paths:
               $ref: "#/components/schemas/DemoResetRequest"
       responses:
         "200":
-          description: Synthetic core state reset and reference seed data restored.
+          description: Synthetic accounts/sessions cleared and orchestration/reference state restored.
           headers:
             X-Request-ID:
               $ref: "#/components/headers/RequestId"
@@ -581,8 +834,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        Verified patient JWT. The `sub` claim owns trip requests and journeys.
-        The `preferred_currency` claim is an ISO 4217 display currency.
+        Backend-issued HS256 access JWT. Required claims are `iss`, `aud`,
+        `sub`, `sid`, `preferred_currency`, `iat`, and `exp`. `sub` is the
+        stable patient ID; `sid` identifies an active stored auth session; and
+        `preferred_currency` controls reference-price display. The backend
+        accepts only its configured algorithm, issuer, and audience and rejects
+        expired, revoked, or unknown sessions. It also rejects a token whose
+        currency claim no longer matches the persisted patient profile; another
+        active device can refresh its own session to obtain the current claim.
     ProviderSecret:
       type: apiKey
       in: header
@@ -661,6 +920,12 @@ components:
       schema:
         type: boolean
       example: false
+    NoStore:
+      description: Prevents clients and intermediaries from caching credentials.
+      schema:
+        type: string
+        const: no-store
+      example: no-store
 
   responses:
     BadRequest:
@@ -742,6 +1007,21 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    TooManyRequests:
+      description: The caller exceeded the bounded request rate for this operation.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+        Retry-After:
+          description: Seconds until the caller should retry.
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
 
   schemas:
     ResourceId:
@@ -775,6 +1055,41 @@ components:
       type: string
       pattern: "^[A-Z]{3}$"
       example: SGD
+
+    ReferenceCurrency:
+      type: string
+      description: Currency supported by the static demo FX table for patient-facing prices.
+      enum: [SGD, IDR]
+
+    EmailAddress:
+      type: string
+      format: email
+      minLength: 3
+      maxLength: 254
+      description: Trimmed and normalized to lowercase before persistence and lookup.
+      example: rina.tan@example.test
+
+    Password:
+      type: string
+      format: password
+      writeOnly: true
+      minLength: 8
+      maxLength: 72
+      description: |
+        Patient-supplied password. The backend enforces the limit on UTF-8 bytes,
+        hashes it with bcrypt, and never logs or stores the plaintext value.
+
+    AccessToken:
+      type: string
+      minLength: 20
+      maxLength: 4096
+      description: Short-lived backend-issued HS256 JWT.
+
+    RefreshToken:
+      type: string
+      minLength: 43
+      maxLength: 256
+      description: High-entropy opaque credential; only its SHA-256 hash is persisted.
 
     Money:
       type: object
@@ -884,6 +1199,108 @@ components:
           enum: [UP, DOWN, NOT_CHECKED]
         checked_at:
           $ref: "#/components/schemas/UtcInstant"
+
+    RegisterPatientRequest:
+      type: object
+      additionalProperties: false
+      required: [full_name, email, password]
+      properties:
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          description: Patient display name after surrounding whitespace is trimmed.
+        email:
+          $ref: "#/components/schemas/EmailAddress"
+        password:
+          $ref: "#/components/schemas/Password"
+        preferred_currency:
+          $ref: "#/components/schemas/ReferenceCurrency"
+          description: Optional at registration; the backend uses `SGD` when omitted.
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          $ref: "#/components/schemas/EmailAddress"
+        password:
+          $ref: "#/components/schemas/Password"
+
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          $ref: "#/components/schemas/RefreshToken"
+
+    PatientProfile:
+      type: object
+      additionalProperties: false
+      required: [id, full_name, email, preferred_currency, synthetic, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ResourceId"
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        email:
+          $ref: "#/components/schemas/EmailAddress"
+        preferred_currency:
+          $ref: "#/components/schemas/ReferenceCurrency"
+        synthetic:
+          type: boolean
+          description: True for every account used in the hackathon environment.
+        created_at:
+          $ref: "#/components/schemas/UtcInstant"
+        updated_at:
+          $ref: "#/components/schemas/UtcInstant"
+
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required:
+        - token_type
+        - access_token
+        - refresh_token
+        - expires_in_seconds
+        - refresh_expires_at
+        - profile
+      properties:
+        token_type:
+          type: string
+          const: Bearer
+        access_token:
+          $ref: "#/components/schemas/AccessToken"
+        refresh_token:
+          $ref: "#/components/schemas/RefreshToken"
+        expires_in_seconds:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          example: 900
+        refresh_expires_at:
+          $ref: "#/components/schemas/UtcInstant"
+        profile:
+          $ref: "#/components/schemas/PatientProfile"
+
+    UpdatePatientProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      minProperties: 2
+      properties:
+        refresh_token:
+          $ref: "#/components/schemas/RefreshToken"
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        preferred_currency:
+          $ref: "#/components/schemas/ReferenceCurrency"
 
     MedicalService:
       type: object

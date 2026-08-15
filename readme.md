@@ -2,7 +2,7 @@
 
 Batam MedHub orchestrates a medical tourist's planned journey from Singapore to Batam across hospital appointments, ferry travel, internal transport, and accommodation. It creates a feasible cross-provider itinerary and coordinates recovery when a provider disruption invalidates part of that journey.
 
-> Project status: OpenAPI and architecture contract v0.1 are frozen. Application implementation has not started.
+> Project status: core OpenAPI/architecture v0.2 and provider OpenAPI v0.1 are defined. Core/provider implementation has not started.
 
 ## Why it exists
 
@@ -15,7 +15,7 @@ Cloudflare Workers AI extracts structured intent from the patient's prompt. The 
 | Area | Responsibility | Owner |
 |---|---|---|
 | `mobile/` | Patient application | Mobile teammate; out of scope for these workstreams |
-| `backend/` | Core API, intent validation, planning, booking saga, itinerary versions, and disruption recovery | Backend worker |
+| `backend/` | Patient auth/profile, core API, intent validation, planning, booking saga, itinerary versions, and disruption recovery | Backend worker |
 | `providers/` | Four headless provider APIs: hospital, ferry, hotel, and internal transport | Provider worker |
 | `specs/` | Core and provider OpenAPI contracts plus golden examples | Control plane |
 | `docs/architecture/` | Domain model, state machines, and logical ERDs | Control plane |
@@ -51,6 +51,7 @@ Commit this contract baseline before creating the worktrees so every worker star
 
 ## Contracted hackathon slice
 
+- Backend-owned registration, login, rotating refresh sessions, logout, and patient profile currency preference.
 - Catalog-driven planned medical services with explicit unsupported and out-of-scope results.
 - Natural-language prompt to validated structured intent.
 - Deterministic appointment-anchored planning with cross-border time and capacity constraints.
@@ -59,7 +60,7 @@ Commit this contract baseline before creating the worktrees so every worker star
 - Immutable itinerary versions and provider-authenticated disruption recovery.
 - Persisted synthetic provider data and a deterministic demo reset.
 
-Medical records, post-care, multilingual product behavior, payments, real providers, and production compliance are later-phase work.
+Password recovery, email verification, MFA, social login, medical records, post-care, multilingual product behavior, payments, real providers, and production compliance are later-phase work.
 
 ## Synthetic-data notice
 
