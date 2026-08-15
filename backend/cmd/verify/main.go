@@ -1750,10 +1750,29 @@ func testDemoReset(db *gorm.DB, dbURL, jwtSecret string) {
 }
 
 func cleanupProviderDatabases(coreDBURL string) {
+	candidates := []string{
+		os.Getenv("PROVIDER_DATABASE_URL"),
+		"postgres://provider_admin:provider_admin_dev_password@172.21.0.2:5432",
+		"postgres://provider_admin:provider_admin_dev_password@localhost:5432",
+	}
 	for _, dbName := range []string{"hospital_db", "ferry_db", "hotel_db", "transport_db"} {
-		targetURL := strings.Replace(coreDBURL, "/core_db", "/"+dbName, 1)
-		pDB, err := database.Open(targetURL)
-		if err == nil {
+		var pDB *gorm.DB
+		var err error
+		for _, base := range candidates {
+			if base == "" {
+				continue
+			}
+			targetURL := fmt.Sprintf("%s/%s?sslmode=disable", strings.TrimSuffix(base, "/"), dbName)
+			pDB, err = database.Open(targetURL)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			targetURL := strings.Replace(coreDBURL, "/core_db", "/"+dbName, 1)
+			pDB, err = database.Open(targetURL)
+		}
+		if err == nil && pDB != nil {
 			_ = pDB.Exec("DELETE FROM reservations; DELETE FROM holds; DELETE FROM idempotency_records;").Error
 			if dbName == "hotel_db" {
 				_ = pDB.Exec("DELETE FROM hold_nights;").Error
