@@ -12,6 +12,9 @@ import (
 	"strconv"
 	"time"
 
+	"batam-medhub/internal/config"
+	"batam-medhub/internal/service"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -56,13 +59,65 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.code }
 
-func New(db *gorm.DB, logger *slog.Logger) *gin.Engine {
+// New constructs and configures the Gin HTTP engine with middleware and routes.
+func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
+	router.HandleMethodNotAllowed = true
+
 	router.Use(requestID(), requestLogger(logger), structuredErrors(), recoverPanics(logger))
+
+	router.NoRoute(func(c *gin.Context) {
+		abort(c, &apiError{
+			status:  http.StatusNotFound,
+			code:    "NOT_FOUND",
+			message: "The requested resource was not found.",
+		})
+	})
+
+	router.NoMethod(func(c *gin.Context) {
+		abort(c, &apiError{
+			status:  http.StatusMethodNotAllowed,
+			code:    "METHOD_NOT_ALLOWED",
+			message: "Method not allowed for this route.",
+		})
+	})
+
 	router.GET("/healthz", liveness)
 	router.GET("/readyz", readiness(db))
+
+	authSvc := service.NewAuthService(db, cfg)
+	profileSvc := service.NewProfileService(db, cfg)
+	catalogSvc := service.NewCatalogService(db)
+
+	authRateLimiter := newIPRateLimiter(60, time.Minute)
+
+	v1 := router.Group("/v1")
+	{
+		authGroup := v1.Group("/auth")
+		authGroup.Use(noStoreHeader(), rateLimitMiddleware(authRateLimiter))
+		{
+			authGroup.POST("/register", handleRegister(authSvc))
+			authGroup.POST("/login", handleLogin(authSvc))
+			authGroup.POST("/refresh", handleRefresh(authSvc))
+			authGroup.POST("/logout", handleLogout(authSvc))
+		}
+
+		profileGroup := v1.Group("/profile")
+		profileGroup.Use(patientBearerAuth(db, cfg))
+		{
+			profileGroup.GET("", handleGetProfile(profileSvc))
+			profileGroup.PATCH("", noStoreHeader(), handleUpdateProfile(profileSvc))
+		}
+
+		catalogGroup := v1.Group("/medical-services")
+		catalogGroup.Use(patientBearerAuth(db, cfg))
+		{
+			catalogGroup.GET("", handleListMedicalServices(catalogSvc))
+		}
+	}
+
 	return router
 }
 

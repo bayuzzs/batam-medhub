@@ -19,16 +19,16 @@ INSERT INTO provider_credentials (
     expires_at, synthetic, created_at, updated_at
 ) VALUES
     ('00000000-0000-4000-8000-000000000201', '00000000-0000-4000-8000-000000000101',
-        'hospital-demo-v1', 'db0e409c75d1271be13c172285e6bd060c7ecc6710cf35e4965dbad963015b6f',
+        'hospital-demo-v1', '461dfce091195ef876ea27496743a176c4deacc8e50ba3d37126448869f88814',
         'SHA256', 'ACTIVE', NULL, true, '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z'),
     ('00000000-0000-4000-8000-000000000202', '00000000-0000-4000-8000-000000000102',
-        'ferry-demo-v1', 'e07f7fd6b8f901af3fc022555f6f8a54425afd194b58e00a03d8610ad93ebaea',
+        'ferry-demo-v1', 'b291d2694b0540849da60bf10f26bfc4a2c325aeec93c5353f197deaddc941df',
         'SHA256', 'ACTIVE', NULL, true, '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z'),
     ('00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000103',
-        'hotel-demo-v1', '5fcdf35b2ebf1ac6b1a3c75d06796733e3712a72c33e31fa128128c93a3b0d9d',
+        'hotel-demo-v1', '29a39b089fe0653a10d3b282f8e6370f01ac95ef31f18c2dce735749f36070c1',
         'SHA256', 'ACTIVE', NULL, true, '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z'),
     ('00000000-0000-4000-8000-000000000204', '00000000-0000-4000-8000-000000000104',
-        'transport-demo-v1', '7e9cafe0d0fcd3bf10e1995134bab6557ed2e11abb30fbe89095e099ee5a98fa',
+        'transport-demo-v1', 'e01da70ce71e8788bde2456362b1b7d75ce3ed2171d3cde5509b6fe083e1c5fd',
         'SHA256', 'ACTIVE', NULL, true, '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z');
 
 INSERT INTO medical_services (
