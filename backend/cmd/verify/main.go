@@ -1618,5 +1618,3 @@ func cleanupProviderDatabases(coreDBURL string) {
 		}
 	}
 }
-
-
