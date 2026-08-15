@@ -104,15 +104,17 @@ type TripService struct {
 	catalog    *CatalogService
 	money      *MoneyService
 	aggregator *adapter.Aggregator
+	ai         IntentExtractor
 }
 
 // NewTripService constructs a TripService.
-func NewTripService(db *gorm.DB, catalog *CatalogService, money *MoneyService, aggregator *adapter.Aggregator) *TripService {
+func NewTripService(db *gorm.DB, catalog *CatalogService, money *MoneyService, aggregator *adapter.Aggregator, ai IntentExtractor) *TripService {
 	return &TripService{
 		db:         db,
 		catalog:    catalog,
 		money:      money,
 		aggregator: aggregator,
+		ai:         ai,
 	}
 }
 
@@ -151,7 +153,13 @@ func (s *TripService) CreateTripRequest(ctx context.Context, patientID, prompt, 
 	}
 
 	// 2. Structured intent extraction
-	intent, err := ExtractIntent(ctx, s.catalog, prompt, locale, referenceCurrency)
+	var intent *StructuredIntent
+	var err error
+	if s.ai != nil {
+		intent, err = s.ai.ExtractIntent(ctx, prompt, locale, referenceCurrency)
+	} else {
+		intent, err = ExtractIntentDeterministic(ctx, s.catalog, prompt, locale, referenceCurrency)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("extract intent: %w", err)
 	}
@@ -314,7 +322,36 @@ func (s *TripService) AmendIntent(ctx context.Context, patientID, tripID string,
 
 	// Apply freeform clarification answer
 	if req.Answer != nil && *req.Answer != "" {
-		answerLower := strings.ToLower(*req.Answer)
+		answerText := strings.TrimSpace(*req.Answer)
+		if s.ai != nil {
+			combinedPrompt := intent.RequestedServiceText + ". Additional patient clarification: " + answerText
+			if extracted, err := s.ai.ExtractIntent(ctx, combinedPrompt, "en", trip.ReferenceCurrency); err == nil && extracted != nil {
+				if extracted.ServiceCode != nil {
+					intent.ServiceCode = extracted.ServiceCode
+					intent.RequestedServiceText = extracted.RequestedServiceText
+				}
+				if extracted.DateWindow != nil {
+					intent.DateWindow = extracted.DateWindow
+				}
+				if extracted.OriginPort != nil {
+					intent.OriginPort = extracted.OriginPort
+				}
+				if extracted.PatientCount != nil {
+					intent.PatientCount = extracted.PatientCount
+				}
+				if extracted.CompanionCount != nil {
+					intent.CompanionCount = extracted.CompanionCount
+				}
+				if extracted.StayType != nil {
+					intent.StayType = extracted.StayType
+				}
+				if extracted.Budget != nil {
+					intent.Budget = extracted.Budget
+				}
+			}
+		}
+
+		answerLower := strings.ToLower(answerText)
 		if strings.Contains(answerLower, "basic") {
 			code := "MCU_BASIC"
 			intent.ServiceCode = &code

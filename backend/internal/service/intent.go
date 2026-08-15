@@ -156,8 +156,18 @@ func ValidateStructuredIntent(intent *StructuredIntent) error {
 	return nil
 }
 
-// ExtractIntent parses freeform patient text into a structured intent snapshot.
+// IntentExtractor defines the contract for parsing patient inquiries into structured intent.
+type IntentExtractor interface {
+	ExtractIntent(ctx context.Context, prompt, locale, referenceCurrency string) (*StructuredIntent, error)
+}
+
+// ExtractIntent parses freeform patient text into a structured intent snapshot using deterministic extraction.
 func ExtractIntent(ctx context.Context, catalog *CatalogService, prompt, locale, referenceCurrency string) (*StructuredIntent, error) {
+	return ExtractIntentDeterministic(ctx, catalog, prompt, locale, referenceCurrency)
+}
+
+// ExtractIntentDeterministic performs rule-based and fixture-aware intent extraction.
+func ExtractIntentDeterministic(ctx context.Context, catalog *CatalogService, prompt, locale, referenceCurrency string) (*StructuredIntent, error) {
 	lower := strings.ToLower(prompt)
 	lang := locale
 	if lang == "" {
@@ -297,31 +307,33 @@ func ExtractIntent(ctx context.Context, catalog *CatalogService, prompt, locale,
 	}
 
 	// Check catalog
-	if _, err := catalog.LookupMedicalService(ctx, serviceCode); err != nil {
-		reason := "The requested service is not available in the active Batam MedHub catalog."
-		return &StructuredIntent{
-			SchemaVersion:         "1.0",
-			Resolution:            ResolutionUnsupportedService,
-			IntentCategory:        nil,
-			RequestedServiceText:  serviceText,
-			ServiceCode:           nil,
-			CandidateServiceCodes: []string{},
-			OriginPort:            nil,
-			DateWindow:            nil,
-			PatientCount:          nil,
-			CompanionCount:        nil,
-			StayType:              nil,
-			Budget:                nil,
-			Preferences: IntentPreferences{
-				Language:      &lang,
-				HotelTier:     nil,
-				Accessibility: []string{},
-			},
-			MissingFields:         []string{},
-			ClarificationQuestion: nil,
-			OutOfScopeReason:      nil,
-			UnsupportedReason:     &reason,
-		}, nil
+	if catalog != nil {
+		if _, err := catalog.LookupMedicalService(ctx, serviceCode); err != nil {
+			reason := "The requested service is not available in the active Batam MedHub catalog."
+			return &StructuredIntent{
+				SchemaVersion:         "1.0",
+				Resolution:            ResolutionUnsupportedService,
+				IntentCategory:        nil,
+				RequestedServiceText:  serviceText,
+				ServiceCode:           nil,
+				CandidateServiceCodes: []string{},
+				OriginPort:            nil,
+				DateWindow:            nil,
+				PatientCount:          nil,
+				CompanionCount:        nil,
+				StayType:              nil,
+				Budget:                nil,
+				Preferences: IntentPreferences{
+					Language:      &lang,
+					HotelTier:     nil,
+					Accessibility: []string{},
+				},
+				MissingFields:         []string{},
+				ClarificationQuestion: nil,
+				OutOfScopeReason:      nil,
+				UnsupportedReason:     &reason,
+			}, nil
+		}
 	}
 
 	originPort := "HARBOURFRONT_SG"

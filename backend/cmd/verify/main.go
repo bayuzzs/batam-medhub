@@ -162,7 +162,11 @@ func main() {
 	testConfirmationCompensation(db, jwtSecret)
 	fmt.Println("[PASS] Confirmation compensation verified: on confirm failure, confirmed items and unconfirmed holds released and trip transitions to CONFIRMATION_FAILED.")
 
-	fmt.Println("\n=== ALL B7 SAGA AND JOURNEY TRACKING VERIFICATIONS COMPLETED SUCCESSFULLY ===")
+	// 11. Test Cloudflare Workers AI Intent Extractor (Phase B8)
+	testWorkersAIExtractor(db, jwtSecret)
+	fmt.Println("[PASS] Cloudflare Workers AI extractor verified (guardrails, retries, catalog validation, and seamless fallback).")
+
+	fmt.Println("\n=== ALL B7 AND B8 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
 }
 
 func registerPatient(apiBaseURL, email, name, password, currency string) string {
@@ -753,3 +757,330 @@ func testConfirmationCompensation(db *gorm.DB, jwtSecret string) {
 		panic(fmt.Sprintf("expected ferry reservation ferry-res-comp-01 to be released, got %s", releasedReservationID))
 	}
 }
+
+func testWorkersAIExtractor(db *gorm.DB, jwtSecret string) {
+	var aiCallCount int
+	var retryTriggered bool
+
+	mockAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		aiCallCount++
+		if r.Header.Get("Authorization") != "Bearer test-cf-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		lastMsg := ""
+		if len(req.Messages) > 0 {
+			lastMsg = strings.ToLower(req.Messages[len(req.Messages)-1].Content)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		// If this is a retry request
+		if strings.Contains(lastMsg, "previous output was not valid json") {
+			retryTriggered = true
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result": map[string]any{
+					"response": `{
+						"schema_version": "1.0",
+						"resolution": "NEEDS_CLARIFICATION",
+						"intent_category": "PREVENTIVE_CHECKUP",
+						"requested_service_text": "medical check-up",
+						"service_code": null,
+						"candidate_service_codes": ["MCU_BASIC", "MCU_COMPREHENSIVE"],
+						"origin_port": "HARBOURFRONT_SG",
+						"date_window": null,
+						"patient_count": 1,
+						"companion_count": 0,
+						"stay_type": null,
+						"budget": null,
+						"preferences": {"language": "en", "hotel_tier": null, "accessibility": []},
+						"missing_fields": ["service_code", "date_window"],
+						"clarification_question": "Would you like basic or comprehensive check-up, and on which date?",
+						"out_of_scope_reason": null,
+						"unsupported_reason": null
+					}`,
+				},
+			})
+			return
+		}
+
+		// Test malformed JSON on first prompt if asking for "vague checkup"
+		if strings.Contains(lastMsg, "vague checkup") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result": map[string]any{
+					"response": "Here is your JSON: { invalid json without closing",
+				},
+			})
+			return
+		}
+
+		// Normal matched extraction response
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"result": map[string]any{
+				"response": `{
+					"schema_version": "1.0",
+					"resolution": "MATCHED",
+					"intent_category": "PREVENTIVE_CHECKUP",
+					"requested_service_text": "basic medical check-up",
+					"service_code": "MCU_BASIC",
+					"candidate_service_codes": [],
+					"origin_port": "HARBOURFRONT_SG",
+					"date_window": {
+						"from": "2026-08-22",
+						"to": "2026-08-22"
+					},
+					"patient_count": 1,
+					"companion_count": 1,
+					"stay_type": "SAME_DAY",
+					"budget": {
+						"amount_minor": 40000,
+						"currency": "SGD"
+					},
+					"preferences": {
+						"language": "en",
+						"hotel_tier": null,
+						"accessibility": []
+					},
+					"missing_fields": [],
+					"clarification_question": null,
+					"out_of_scope_reason": null,
+					"unsupported_reason": null
+				}`,
+			},
+		})
+	}))
+	defer mockAIServer.Close()
+
+	cfg := config.Config{
+		HTTPAddr:                ":8096",
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		JWTSigningSecret:        jwtSecret,
+		JWTIssuer:               "batam-medhub",
+		JWTAudience:             "batam-medhub-mobile",
+		JWTAccessTTL:            15 * time.Minute,
+		RefreshTokenTTL:         30 * 24 * time.Hour,
+		HospitalBaseURL:         "http://localhost:8081",
+		HospitalIntegrationKey:  "hospital_dev_secret",
+		FerryBaseURL:            "http://localhost:8082",
+		FerryIntegrationKey:     "ferry_dev_secret",
+		HotelBaseURL:            "http://localhost:8083",
+		HotelIntegrationKey:     "hotel_dev_secret",
+		TransportBaseURL:        "http://localhost:8084",
+		TransportIntegrationKey: "transport_dev_secret",
+		ProviderTimeout:         5 * time.Second,
+		CloudflareAccountID:     "test-cf-acc",
+		CloudflareAPIToken:      "test-cf-token",
+		CloudflareAIModel:       "@cf/meta/llama-3.1-8b-instruct",
+		CloudflareAIBaseURL:     mockAIServer.URL,
+		CloudflareAITimeout:     5 * time.Second,
+	}
+
+	testEngine := httpapi.New(db, cfg, nil)
+	testServer := httptest.NewServer(testEngine)
+	defer testServer.Close()
+
+	token := registerPatient(testServer.URL, fmt.Sprintf("b8_ai_%d@test.test", time.Now().UnixNano()), "AI Patient", "Passw0rd123!", "SGD")
+
+	// 1. Test AI Matched Intent Extraction
+	reqPayload1 := map[string]any{
+		"prompt": "I need a same-day basic medical check-up in Batam on 22 August, leaving from HarbourFront with my spouse, with a budget of SGD 400.",
+		"locale": "en",
+	}
+	bodyBytes1, _ := json.Marshal(reqPayload1)
+	req1, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/trip-requests", bytes.NewReader(bodyBytes1))
+	req1.Header.Set("Authorization", "Bearer "+token)
+	req1.Header.Set("Idempotency-Key", fmt.Sprintf("idem-ai-1-%d", time.Now().UnixNano()))
+	req1.Header.Set("Content-Type", "application/json")
+
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		panic(err)
+	}
+	defer resp1.Body.Close()
+
+	if resp1.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(resp1.Body)
+		panic(fmt.Sprintf("expected 201 Created on AI trip request, got %d: %s", resp1.StatusCode, string(raw)))
+	}
+
+	var detail1 struct {
+		TripRequest struct {
+			Status string `json:"status"`
+			Intent struct {
+				Resolution  string  `json:"resolution"`
+				ServiceCode *string `json:"service_code"`
+			} `json:"intent"`
+		} `json:"trip_request"`
+	}
+	_ = json.NewDecoder(resp1.Body).Decode(&detail1)
+
+	if detail1.TripRequest.Status != "PLANNING" || detail1.TripRequest.Intent.Resolution != "MATCHED" {
+		panic(fmt.Sprintf("expected trip status PLANNING / MATCHED, got %s / %s", detail1.TripRequest.Status, detail1.TripRequest.Intent.Resolution))
+	}
+	if detail1.TripRequest.Intent.ServiceCode == nil || *detail1.TripRequest.Intent.ServiceCode != "MCU_BASIC" {
+		panic("expected MCU_BASIC service code")
+	}
+
+	// 2. Test Emergency Guardrail (bypasses LLM)
+	currentAICalls := aiCallCount
+	reqPayload2 := map[string]any{
+		"prompt": "I have sudden severe chest pain and difficulty breathing, need an ambulance immediately.",
+		"locale": "en",
+	}
+	bodyBytes2, _ := json.Marshal(reqPayload2)
+	req2, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/trip-requests", bytes.NewReader(bodyBytes2))
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("Idempotency-Key", fmt.Sprintf("idem-ai-2-%d", time.Now().UnixNano()))
+	req2.Header.Set("Content-Type", "application/json")
+
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		panic(err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusCreated {
+		panic(fmt.Sprintf("expected 201 on emergency prompt, got %d", resp2.StatusCode))
+	}
+	var detail2 struct {
+		TripRequest struct {
+			Status string `json:"status"`
+			Intent struct {
+				Resolution       string  `json:"resolution"`
+				OutOfScopeReason *string `json:"out_of_scope_reason"`
+			} `json:"intent"`
+		} `json:"trip_request"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&detail2)
+
+	if detail2.TripRequest.Status != "OUT_OF_SCOPE" || detail2.TripRequest.Intent.Resolution != "OUT_OF_SCOPE" {
+		panic(fmt.Sprintf("expected OUT_OF_SCOPE for emergency triage, got %s", detail2.TripRequest.Status))
+	}
+	if detail2.TripRequest.Intent.OutOfScopeReason == nil || *detail2.TripRequest.Intent.OutOfScopeReason == "" {
+		panic("expected populated out_of_scope_reason")
+	}
+	if aiCallCount != currentAICalls {
+		panic("emergency guardrail should not call external Workers AI model")
+	}
+
+	// 3. Test Malformed JSON 1-Retry
+	reqPayload3 := map[string]any{
+		"prompt": "I need a vague checkup in Batam.",
+		"locale": "en",
+	}
+	bodyBytes3, _ := json.Marshal(reqPayload3)
+	req3, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/trip-requests", bytes.NewReader(bodyBytes3))
+	req3.Header.Set("Authorization", "Bearer "+token)
+	req3.Header.Set("Idempotency-Key", fmt.Sprintf("idem-ai-3-%d", time.Now().UnixNano()))
+	req3.Header.Set("Content-Type", "application/json")
+
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		panic(err)
+	}
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode != http.StatusCreated {
+		panic(fmt.Sprintf("expected 201 on vague checkup, got %d", resp3.StatusCode))
+	}
+	var detail3 struct {
+		TripRequest struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Intent struct {
+				Resolution            string  `json:"resolution"`
+				ClarificationQuestion *string `json:"clarification_question"`
+			} `json:"intent"`
+		} `json:"trip_request"`
+	}
+	_ = json.NewDecoder(resp3.Body).Decode(&detail3)
+
+	if !retryTriggered {
+		panic("expected 1-retry to be triggered upon malformed JSON from model")
+	}
+	if detail3.TripRequest.Status != "NEEDS_INPUT" || detail3.TripRequest.Intent.Resolution != "NEEDS_CLARIFICATION" {
+		panic(fmt.Sprintf("expected NEEDS_INPUT / NEEDS_CLARIFICATION, got %s / %s", detail3.TripRequest.Status, detail3.TripRequest.Intent.Resolution))
+	}
+
+	// 4. Test Intent Amendment on Trip Request
+	amendPayload := map[string]any{
+		"answer": "I would like the basic medical check-up on 22 August 2026.",
+	}
+	bodyAmend, _ := json.Marshal(amendPayload)
+	reqAmend, _ := http.NewRequest(http.MethodPatch, testServer.URL+"/v1/trip-requests/"+detail3.TripRequest.ID+"/intent", bytes.NewReader(bodyAmend))
+	reqAmend.Header.Set("Authorization", "Bearer "+token)
+	reqAmend.Header.Set("Idempotency-Key", fmt.Sprintf("idem-ai-amend-%d", time.Now().UnixNano()))
+	reqAmend.Header.Set("Content-Type", "application/json")
+
+	respAmend, err := http.DefaultClient.Do(reqAmend)
+	if err != nil {
+		panic(err)
+	}
+	defer respAmend.Body.Close()
+
+	if respAmend.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(respAmend.Body)
+		panic(fmt.Sprintf("expected 200 OK on amend intent, got %d: %s", respAmend.StatusCode, string(raw)))
+	}
+
+	var amendDetail struct {
+		TripRequest struct {
+			Status string `json:"status"`
+			Intent struct {
+				Resolution  string  `json:"resolution"`
+				ServiceCode *string `json:"service_code"`
+			} `json:"intent"`
+		} `json:"trip_request"`
+	}
+	_ = json.NewDecoder(respAmend.Body).Decode(&amendDetail)
+	if amendDetail.TripRequest.Status != "PLANNING" || amendDetail.TripRequest.Intent.Resolution != "MATCHED" {
+		panic(fmt.Sprintf("expected amended trip status PLANNING / MATCHED, got %s / %s", amendDetail.TripRequest.Status, amendDetail.TripRequest.Intent.Resolution))
+	}
+
+	// 5. Test Seamless Fallback on Network Outage
+	mockAIServer.Close() // Close mock server to simulate network / API outage
+	reqPayload5 := map[string]any{
+		"prompt": "I need a same-day basic medical check-up in Batam on 22 August from HarbourFront with my spouse, budget SGD 400.",
+		"locale": "en",
+	}
+	bodyBytes5, _ := json.Marshal(reqPayload5)
+	req5, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/trip-requests", bytes.NewReader(bodyBytes5))
+	req5.Header.Set("Authorization", "Bearer "+token)
+	req5.Header.Set("Idempotency-Key", fmt.Sprintf("idem-ai-5-%d", time.Now().UnixNano()))
+	req5.Header.Set("Content-Type", "application/json")
+
+	resp5, err := http.DefaultClient.Do(req5)
+	if err != nil {
+		panic(err)
+	}
+	defer resp5.Body.Close()
+
+	if resp5.StatusCode != http.StatusCreated {
+		panic(fmt.Sprintf("expected 201 on seamless fallback when AI is down, got %d", resp5.StatusCode))
+	}
+	var detail5 struct {
+		TripRequest struct {
+			Status string `json:"status"`
+			Intent struct {
+				Resolution string `json:"resolution"`
+			} `json:"intent"`
+		} `json:"trip_request"`
+	}
+	_ = json.NewDecoder(resp5.Body).Decode(&detail5)
+	if detail5.TripRequest.Status != "PLANNING" || detail5.TripRequest.Intent.Resolution != "MATCHED" {
+		panic("expected seamless deterministic fallback to produce MATCHED planning intent")
+	}
+}
+

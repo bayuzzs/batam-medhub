@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"batam-medhub/internal/adapter"
+	"batam-medhub/internal/ai"
 	"batam-medhub/internal/config"
 	"batam-medhub/internal/service"
 
@@ -104,7 +105,10 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	transAdapter := adapter.NewTransportAdapter(cfg.TransportBaseURL, cfg.TransportIntegrationKey, cfg.ProviderTimeout)
 	aggregator := adapter.NewAggregator(hospAdapter, ferryAdapter, hotelAdapter, transAdapter)
 
-	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator)
+	aiClient := ai.NewClient(cfg.CloudflareAIBaseURL, cfg.CloudflareAccountID, cfg.CloudflareAPIToken, cfg.CloudflareAIModel, cfg.CloudflareAITimeout)
+	aiExtractor := ai.NewExtractor(aiClient, catalogSvc, logger)
+
+	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator, aiExtractor)
 	bookingSvc := service.NewBookingSagaService(db, hospAdapter, ferryAdapter, hotelAdapter, transAdapter, moneySvc)
 	journeySvc := service.NewJourneyService(db)
 

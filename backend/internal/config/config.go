@@ -30,6 +30,11 @@ type Config struct {
 	TransportBaseURL        string
 	TransportIntegrationKey string
 	ProviderTimeout         time.Duration
+	CloudflareAccountID     string
+	CloudflareAPIToken      string
+	CloudflareAIModel       string
+	CloudflareAIBaseURL     string
+	CloudflareAITimeout     time.Duration
 }
 
 // Load reads and validates environment configuration for the backend application.
@@ -51,6 +56,11 @@ func Load() (Config, error) {
 		TransportBaseURL:        strings.TrimSpace(os.Getenv("TRANSPORT_BASE_URL")),
 		TransportIntegrationKey: strings.TrimSpace(os.Getenv("TRANSPORT_INTEGRATION_KEY")),
 		ProviderTimeout:         5 * time.Second,
+		CloudflareAccountID:     strings.TrimSpace(os.Getenv("CLOUDFLARE_ACCOUNT_ID")),
+		CloudflareAPIToken:      strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")),
+		CloudflareAIModel:       strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_MODEL")),
+		CloudflareAIBaseURL:     strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_BASE_URL")),
+		CloudflareAITimeout:     15 * time.Second,
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = defaultHTTPAddr
@@ -84,6 +94,17 @@ func Load() (Config, error) {
 	}
 	if cfg.TransportIntegrationKey == "" {
 		cfg.TransportIntegrationKey = "transport_dev_secret"
+	}
+	if cfg.CloudflareAIModel == "" {
+		cfg.CloudflareAIModel = "@cf/meta/llama-3.1-8b-instruct"
+	}
+	if cfg.CloudflareAIBaseURL == "" {
+		cfg.CloudflareAIBaseURL = "https://api.cloudflare.com/client/v4"
+	}
+	if timeoutStr := strings.TrimSpace(os.Getenv("CLOUDFLARE_AI_TIMEOUT_SECONDS")); timeoutStr != "" {
+		if sec, err := strconv.Atoi(timeoutStr); err == nil && sec > 0 {
+			cfg.CloudflareAITimeout = time.Duration(sec) * time.Second
+		}
 	}
 	if timeoutStr := strings.TrimSpace(os.Getenv("PROVIDER_HTTP_TIMEOUT_SECONDS")); timeoutStr != "" {
 		if sec, err := strconv.Atoi(timeoutStr); err == nil && sec > 0 {
