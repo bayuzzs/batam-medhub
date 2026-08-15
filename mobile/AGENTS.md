@@ -11,7 +11,8 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
   - `lib/ui/core/` — shared app-level things: `app_theme.dart`, `app_colors.dart`,
     `app_spacing.dart`, `app_assets.dart`, `app_container.dart`,
     `primary_radial_gradient.dart`, `app_text_field.dart`, `app_validators.dart`,
-    `app_router.dart`, and other shared widgets
+    `app_router.dart`, `app_bottom_nav.dart`, `main_shell.dart`, and other shared
+    widgets
 - `lib/data/` — data layer (no UI imports here)
   - `lib/data/repository/` — data repositories (fetch/sync domain data, abstracts + impls)
   - `lib/data/service/` — services (API/network clients, platform integrations)
@@ -36,6 +37,16 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
   - `AppRouter.router` — the `GoRouter` config wired into `MaterialApp.router` in `main.dart`.
   - `AppRouterX` — typed navigation helpers on `BuildContext`, e.g.
     `context.pushLogin()` or `context.goLogin()`.
+- The three bottom-nav destinations (History / New Itinerary / Profile) live in a
+  `StatefulShellRoute.indexedStack` with one `StatefulShellBranch` per tab. The
+  shell Scaffold + `AppBottomNav` live in **`lib/ui/core/main_shell.dart`**
+  (`MainShell`), which takes a `StatefulNavigationShell` and calls
+  `goBranch` on tab select. Each branch keeps its own state (chat scroll,
+  form input, etc.) across tab switches.
+- Feature pages that are shell destinations return **body content only** (no
+  `Scaffold`/`AppBottomNav`/`_selectTab`) — the shell owns those. When pumping
+  such a page in a widget test, wrap it in a `Scaffold` (e.g.
+  `MaterialApp(home: Scaffold(body: ChatPage()))`).
 - When adding a route: add its path to `AppRoutes`, a `GoRoute` to `AppRouter.router`,
   and typed helpers to `AppRouterX`.
 - Helper semantics (two behaviors only):

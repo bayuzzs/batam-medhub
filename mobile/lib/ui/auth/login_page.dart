@@ -35,7 +35,7 @@ class _LoginPageState extends State<LoginPage> {
   void _login() {
     // TODO(auth): validate against the auth service once integrated.
     if (_formKey.currentState?.validate() ?? false) {
-      // Placeholder until auth integration.
+      context.goChat();
     }
   }
 
@@ -95,6 +95,7 @@ class _LoginPageState extends State<LoginPage> {
                         textInputAction: TextInputAction.done,
                         prefixIcon: const Icon(LucideIcons.lock),
                         suffixIcon: IconButton(
+                          color: theme.colorScheme.onSurfaceVariant,
                           icon: Icon(
                             _obscurePassword
                                 ? LucideIcons.eyeOff

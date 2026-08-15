@@ -40,6 +40,7 @@ abstract final class AppTheme {
     return base.copyWith(
       textTheme: _appTextTheme(base.textTheme),
       filledButtonTheme: _filledButtonTheme(),
+      iconButtonTheme: _iconButtonTheme(),
       inputDecorationTheme: _inputDecorationTheme(scheme),
     );
   }
@@ -54,6 +55,13 @@ abstract final class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
+    );
+  }
+
+  /// Global icon button style: icons render in white by default.
+  static IconButtonThemeData _iconButtonTheme() {
+    return IconButtonThemeData(
+      style: IconButton.styleFrom(foregroundColor: Colors.white),
     );
   }
 

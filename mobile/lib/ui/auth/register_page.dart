@@ -114,6 +114,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         textInputAction: TextInputAction.next,
                         prefixIcon: const Icon(LucideIcons.lock),
                         suffixIcon: IconButton(
+                          color: theme.colorScheme.onSurfaceVariant,
                           icon: Icon(
                             _obscurePassword
                                 ? LucideIcons.eyeOff
@@ -135,6 +136,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         textInputAction: TextInputAction.done,
                         prefixIcon: const Icon(LucideIcons.lock),
                         suffixIcon: IconButton(
+                          color: theme.colorScheme.onSurfaceVariant,
                           icon: Icon(
                             _obscureConfirmPassword
                                 ? LucideIcons.eyeOff
