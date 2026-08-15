@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:mobile/ui/core/app_container.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
 
 /// Profile screen (bottom nav destination 2).
 ///

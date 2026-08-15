@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:mobile/ui/chat/chat_options.dart';
 import 'package:mobile/ui/chat/chat_page.dart';
 
 void main() {
@@ -43,9 +44,28 @@ void main() {
 
     // Assistant item with selectable option cards.
     expect(find.text('Which hospital would you prefer?'), findsOneWidget);
-    expect(find.text('RS Awal Bros Batam'), findsOneWidget);
-    expect(find.text('RS Hermina Batam'), findsOneWidget);
-    expect(find.text('RSUD Embung Fatimah'), findsOneWidget);
+
+    // Hospital options live inside ChatOptions; the itinerary card below
+    // reuses 'RS Awal Bros Batam' as its provider name, so scope the finds.
+    final options = find.byType(ChatOptions);
+    expect(
+      find.descendant(of: options, matching: find.text('RS Awal Bros Batam')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: options, matching: find.text('RS Hermina Batam')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: options, matching: find.text('RSUD Embung Fatimah')),
+      findsOneWidget,
+    );
+
+    // Example itinerary option card.
+    expect(find.text('Here\'s a great itinerary for you:'), findsOneWidget);
+    expect(find.text('Cardiac Screening Package'), findsOneWidget);
+    expect(find.text('Recommended'), findsOneWidget);
+    expect(find.text('View Details Itinerary'), findsOneWidget);
 
     // Chat input with a send button.
     expect(find.byType(TextField), findsOneWidget);
@@ -69,8 +89,15 @@ void main() {
     await tester.pump();
 
     // The option card is still present; selection is tracked internally.
-    expect(find.text('RS Hermina Batam'), findsOneWidget);
-    expect(find.text('RS Awal Bros Batam'), findsOneWidget);
+    final options = find.byType(ChatOptions);
+    expect(
+      find.descendant(of: options, matching: find.text('RS Hermina Batam')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: options, matching: find.text('RS Awal Bros Batam')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Typing a message and tapping send clears the input', (

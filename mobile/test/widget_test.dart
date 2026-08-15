@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mobile/main.dart';
-import 'package:mobile/ui/core/app_router.dart';
+import 'package:mobile/ui/core/navigation/app_router.dart';
 
 /// Pumps the app with the router reset to onboarding.
 ///

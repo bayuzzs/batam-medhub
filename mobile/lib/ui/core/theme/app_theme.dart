@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mobile/ui/core/app_colors.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
 
 /// Font families used across the app.
 ///

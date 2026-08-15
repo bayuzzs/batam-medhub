@@ -8,11 +8,14 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
 - `lib/main.dart` — app entry point, `MaterialApp.router` (router lives in core)
 - `lib/ui/` — feature-based UI. Group screens/widgets by feature, one folder per feature.
   - `lib/ui/<feature>/` — e.g. `lib/ui/auth/`, `lib/ui/home/`
-  - `lib/ui/core/` — shared app-level things: `app_theme.dart`, `app_colors.dart`,
-    `app_spacing.dart`, `app_assets.dart`, `app_container.dart`,
-    `primary_radial_gradient.dart`, `app_text_field.dart`, `app_validators.dart`,
-    `app_router.dart`, `app_bottom_nav.dart`, `main_shell.dart`, and other shared
-    widgets
+  - `lib/ui/core/` — shared app-level things, grouped by concern:
+    - `lib/ui/core/theme/` — design tokens: `app_theme.dart`, `app_colors.dart`,
+      `app_spacing.dart`, `app_assets.dart`
+    - `lib/ui/core/widgets/` — reusable widgets & validation:
+      `app_container.dart`, `app_text_field.dart`, `app_validators.dart`,
+      `primary_radial_gradient.dart`, `itenary_option_card.dart`, and others
+    - `lib/ui/core/navigation/` — routing & shell: `app_router.dart`,
+      `main_shell.dart`, `app_bottom_nav.dart`
 - `lib/data/` — data layer (no UI imports here)
   - `lib/data/repository/` — data repositories (fetch/sync domain data, abstracts + impls)
   - `lib/data/service/` — services (API/network clients, platform integrations)
@@ -32,14 +35,14 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
 
 ## Routing
 
-- All routes live centrally in **`lib/ui/core/app_router.dart`**:
+- All routes live centrally in **`lib/ui/core/navigation/app_router.dart`**:
   - `AppRoutes` — route path constants (e.g. `AppRoutes.login`).
   - `AppRouter.router` — the `GoRouter` config wired into `MaterialApp.router` in `main.dart`.
   - `AppRouterX` — typed navigation helpers on `BuildContext`, e.g.
     `context.pushLogin()` or `context.goLogin()`.
 - The three bottom-nav destinations (History / New Itinerary / Profile) live in a
   `StatefulShellRoute.indexedStack` with one `StatefulShellBranch` per tab. The
-  shell Scaffold + `AppBottomNav` live in **`lib/ui/core/main_shell.dart`**
+  shell Scaffold + `AppBottomNav` live in **`lib/ui/core/navigation/main_shell.dart`**
   (`MainShell`), which takes a `StatefulNavigationShell` and calls
   `goBranch` on tab select. Each branch keeps its own state (chat scroll,
   form input, etc.) across tab switches.
@@ -68,7 +71,7 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
 
 ## Validation
 
-- Centralize form validation in **`lib/ui/core/app_validators.dart`**
+- Centralize form validation in **`lib/ui/core/widgets/app_validators.dart`**
   (`AppValidators`). Use `AppValidators.email`, `AppValidators.password`, etc.
   as the `validator` on `AppTextField`/`TextFormField` — don't inline
   validation rules or messages in pages.

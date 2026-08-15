@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import 'package:mobile/ui/core/app_assets.dart';
-import 'package:mobile/ui/core/app_container.dart';
-import 'package:mobile/ui/core/app_router.dart';
-import 'package:mobile/ui/core/app_text_field.dart';
-import 'package:mobile/ui/core/app_validators.dart';
-import 'package:mobile/ui/core/primary_radial_gradient.dart';
+import 'package:mobile/ui/core/theme/app_assets.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
+import 'package:mobile/ui/core/navigation/app_router.dart';
+import 'package:mobile/ui/core/widgets/app_text_field.dart';
+import 'package:mobile/ui/core/widgets/app_validators.dart';
+import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 
 /// Register screen.
 ///

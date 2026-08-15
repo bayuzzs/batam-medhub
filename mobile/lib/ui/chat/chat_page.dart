@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import 'package:mobile/ui/core/app_assets.dart';
-import 'package:mobile/ui/core/app_colors.dart';
-import 'package:mobile/ui/core/app_container.dart';
-import 'package:mobile/ui/core/app_spacing.dart';
-import 'package:mobile/ui/core/primary_radial_gradient.dart';
+import 'package:mobile/ui/core/theme/app_assets.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
+import 'package:mobile/ui/core/widgets/app_container.dart';
+import 'package:mobile/ui/core/widgets/itenary_option_card.dart';
+import 'package:mobile/ui/core/theme/app_spacing.dart';
+import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 import 'package:mobile/ui/chat/chat_item.dart';
 import 'package:mobile/ui/chat/chat_options.dart';
 
@@ -127,6 +128,28 @@ class _ChatPageState extends State<ChatPage> {
                                   subtitle: 'Sekupang · 9 km',
                                 ),
                               ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const ChatItem.assistant(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Here\'s a great itinerary for you:'),
+                            SizedBox(height: 12),
+                            ItenaryOptionCard(
+                              imageUrl: AppAssets.barelang,
+                              providerName: 'RS Awal Bros Batam',
+                              serviceName: 'Cardiac Screening Package',
+                              location: 'Batu Aji · 5 km',
+                              appointment: 'Tomorrow, 09:00',
+                              rating: 4.8,
+                              reviewCount: 212,
+                              duration: '3 days',
+                              price: 'IDR 4.500.000',
+                              recommended: true,
                             ),
                           ],
                         ),

@@ -5,7 +5,7 @@ import 'package:mobile/ui/auth/login_page.dart';
 import 'package:mobile/ui/auth/onboarding_page.dart';
 import 'package:mobile/ui/auth/register_page.dart';
 import 'package:mobile/ui/chat/chat_page.dart';
-import 'package:mobile/ui/core/main_shell.dart';
+import 'package:mobile/ui/core/navigation/main_shell.dart';
 import 'package:mobile/ui/history/history_page.dart';
 import 'package:mobile/ui/profile/profile_page.dart';
 

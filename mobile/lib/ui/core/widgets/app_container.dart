@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:mobile/ui/core/app_spacing.dart';
+import 'package:mobile/ui/core/theme/app_spacing.dart';
 
 /// Standard screen container.
 ///

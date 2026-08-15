@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import 'package:mobile/ui/core/app_colors.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
 
 /// Role of a chat message, controlling the bubble and avatar styling.
 enum ChatRole { user, assistant }

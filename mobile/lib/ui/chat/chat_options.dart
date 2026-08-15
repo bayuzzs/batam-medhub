@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:mobile/ui/core/app_colors.dart';
+import 'package:mobile/ui/core/theme/app_colors.dart';
 
 /// A selectable option card (white card with a border, no radio indicator).
 ///

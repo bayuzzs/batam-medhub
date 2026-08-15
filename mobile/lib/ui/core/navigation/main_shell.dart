@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:mobile/ui/core/app_bottom_nav.dart';
+import 'package:mobile/ui/core/navigation/app_bottom_nav.dart';
 
 /// Root shell for the bottom-nav destinations.
 ///
