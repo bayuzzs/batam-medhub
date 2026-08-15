@@ -1,18 +1,18 @@
 // Basic widget smoke tests for the app entry point and auth flow routing.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mobile/main.dart';
-import 'package:mobile/ui/core/navigation/app_router.dart';
 
-/// Pumps the app with the router reset to onboarding.
+/// Pumps the app inside a fresh [ProviderScope].
 ///
-/// [AppRouter.router] is a shared singleton, so its current location persists
-/// across tests; reset it before each test to keep tests independent.
+/// The router is now a Riverpod provider ([appRouterProvider]) and each test
+/// builds its own scope, so auth state starts fresh (unauthenticated at
+/// onboarding) and no cross-test reset is needed.
 Future<void> _pumpApp(WidgetTester tester) async {
-  AppRouter.router.go(AppRoutes.onboarding);
-  await tester.pumpWidget(const MyApp());
+  await tester.pumpWidget(const ProviderScope(child: MyApp()));
   await tester.pumpAndSettle();
 }
 
@@ -59,6 +59,49 @@ void main() {
     // Chat screen is shown.
     expect(find.text('Hi, Name'), findsOneWidget);
     expect(find.text('Talk with your AI Assistant'), findsOneWidget);
+  });
+
+  testWidgets('Register routes to the chat screen', (WidgetTester tester) async {
+    await _pumpApp(tester);
+
+    // Onboarding → login → register.
+    await tester.tap(find.text('Get Started'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(TextButton, 'Register'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Register'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Your Account'), findsOneWidget);
+
+    // Fill the register form (full name, email, password, confirm).
+    await tester.enterText(find.byType(TextFormField).at(0), 'Rina Tan');
+    await tester.enterText(find.byType(TextFormField).at(1), 'user@medhub.id');
+    await tester.enterText(find.byType(TextFormField).at(2), 'secret123');
+    await tester.enterText(find.byType(TextFormField).at(3), 'secret123');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Register'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Register'));
+    await tester.pumpAndSettle();
+
+    // Authenticated → redirected to the chat shell.
+    expect(find.text('Hi, Name'), findsOneWidget);
+  });
+
+  testWidgets('Logout returns to the login screen', (WidgetTester tester) async {
+    await _pumpApp(tester);
+    await _loginToChat(tester);
+
+    // Open the Profile tab — shows the signed-in patient.
+    await tester.tap(find.byKey(const Key('app_bottom_nav_item_2')));
+    await tester.pumpAndSettle();
+    expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Rina Tan'), findsOneWidget);
+
+    // Sign out → router redirects back to login.
+    await tester.tap(find.widgetWithText(FilledButton, 'Log Out'));
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome Back!'), findsOneWidget);
   });
 
   testWidgets('Bottom nav switches from chat to History', (

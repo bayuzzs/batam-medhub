@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import 'package:mobile/application/auth/providers.dart';
 import 'package:mobile/ui/core/theme/app_assets.dart';
 import 'package:mobile/ui/core/widgets/app_container.dart';
 import 'package:mobile/ui/core/navigation/app_router.dart';
@@ -11,15 +13,17 @@ import 'package:mobile/ui/core/widgets/primary_radial_gradient.dart';
 /// Login screen.
 ///
 /// Shows the logo, welcome texts, email + password inputs, a login button,
-/// and a link to the register page. Pure UI — no auth integration yet.
-class LoginPage extends StatefulWidget {
+/// and a link to the register page. On success the [authControllerProvider]
+/// transitions to `authenticated` and the router redirects to the chat shell;
+/// failures surface as a snackbar.
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -32,10 +36,21 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _login() {
-    // TODO(auth): validate against the auth service once integrated.
-    if (_formKey.currentState?.validate() ?? false) {
-      context.goChat();
+  Future<void> _login() async {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    final notifier = ref.read(authControllerProvider.notifier);
+    final ok = await notifier.login(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+    if (!ok && mounted) {
+      final message = ref.read(authControllerProvider).errorMessage ??
+          'Unable to log in. Please try again.';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -46,6 +61,9 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isSubmitting = ref.watch(
+      authControllerProvider.select((state) => state.isSubmitting),
+    );
 
     return Scaffold(
       body: Stack(
@@ -116,7 +134,16 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                FilledButton(onPressed: _login, child: const Text('Login')),
+                FilledButton(
+                  onPressed: isSubmitting ? null : _login,
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Text('Login'),
+                ),
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,

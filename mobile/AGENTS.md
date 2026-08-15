@@ -5,7 +5,9 @@ Display name: "Batam MedHub"; bundle/application ID: `id.medhub.batam.mobile`.
 
 ## Directory structure
 
-- `lib/main.dart` — app entry point, `MaterialApp.router` (router lives in core)
+- `lib/main.dart` — app entry point. Wraps `MyApp` (a `ConsumerWidget`) in `ProviderScope`; `MaterialApp.router` uses the `appRouterProvider`.
+- `lib/application/` — app-level orchestration / global state (Riverpod). One folder per concern:
+  - `lib/application/auth/` — auth state & wiring: `auth_controller.dart`, `providers.dart`
 - `lib/ui/` — feature-based UI. Group screens/widgets by feature, one folder per feature.
   - `lib/ui/<feature>/` — e.g. `lib/ui/auth/`, `lib/ui/home/`
   - `lib/ui/core/` — shared app-level things, grouped by concern:
@@ -37,9 +39,15 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
 
 - All routes live centrally in **`lib/ui/core/navigation/app_router.dart`**:
   - `AppRoutes` — route path constants (e.g. `AppRoutes.login`).
-  - `AppRouter.router` — the `GoRouter` config wired into `MaterialApp.router` in `main.dart`.
+  - `appRouterProvider` — the `GoRouter` config as a Riverpod provider, wired into
+    `MaterialApp.router` in `main.dart`.
   - `AppRouterX` — typed navigation helpers on `BuildContext`, e.g.
     `context.pushLogin()` or `context.goLogin()`.
+- The router is auth-aware: its `redirect` reads `authControllerProvider`. While
+  `AuthStatus.restoring` no redirect happens (no flicker to login on boot);
+  authenticated users are pulled from the auth screens into the shell; unauthenticated
+  users are redirected to `/login` away from the shell. `appRouterProvider` calls
+  `router.refresh()` whenever auth state changes.
 - The three bottom-nav destinations (History / New Itinerary / Profile) live in a
   `StatefulShellRoute.indexedStack` with one `StatefulShellBranch` per tab. The
   shell Scaffold + `AppBottomNav` live in **`lib/ui/core/navigation/main_shell.dart`**
@@ -50,13 +58,39 @@ Repositories expose models from `lib/models/`; services handle transport/plumbin
   `Scaffold`/`AppBottomNav`/`_selectTab`) — the shell owns those. When pumping
   such a page in a widget test, wrap it in a `Scaffold` (e.g.
   `MaterialApp(home: Scaffold(body: ChatPage()))`).
-- When adding a route: add its path to `AppRoutes`, a `GoRoute` to `AppRouter.router`,
+- When adding a route: add its path to `AppRoutes`, a `GoRoute` to `appRouterProvider`,
   and typed helpers to `AppRouterX`.
 - Helper semantics (two behaviors only):
   - `pushXxx()` — **push** onto the navigation stack (back returns to previous screen).
   - `goXxx()` — **replace** the current screen with the target.
 - **Always navigate via the typed helpers** (`context.pushLogin()`, …) — never call
   `context.push('/login')` with raw strings or import `go_router` directly in feature pages.
+
+## Authentication
+
+Auth lives in `lib/application/auth/` (state/wiring), `lib/data/` (repositories,
+services) and `lib/models/` (session/profile DTOs).
+
+- **`AuthController`** (`lib/application/auth/auth_controller.dart`) — a Riverpod
+  `Notifier<AuthState>`. Restores a persisted session on startup, handles
+  login/register/logout, and schedules an access-token refresh just before the JWT
+  `exp` claim (`AuthSession.accessExpiresAt`, see the `AuthSessionExpiry` extension
+  in `lib/models/auth_session.dart`). `refresh()` shares one in-flight future so
+  concurrent callers (timer + Dio 401) only rotate the single-use refresh token
+  once; on failure the user is signed out.
+- **`providers.dart`** — DI switch. `kUseFakeBackend = true` (default) uses
+  `FakeAuthRepository` + `InMemoryTokenStore` (no backend / platform storage). Set
+  it to `false` to use the real Dio backend (`AuthRepositoryImpl` + `DioAuthApi`) +
+  `SecureTokenStore`. Override `authRepositoryProvider`/`tokenStoreProvider` in
+  tests to swap implementations.
+- **`lib/data/service/auth_interceptor.dart`** — Dio interceptor that attaches the
+  Bearer access token to non-auth requests and transparently refreshes + retries
+  once on a `401`.
+- Fake mode accepts any well-formed credentials; documented demo user is
+  `rina.tan@example.test` / `Demo-Only-Password-2026!`.
+- `LoginPage`/`RegisterPage` call `authControllerProvider.notifier.login/register`;
+  on success the router redirects to `/chat`. `ProfilePage` shows the session's
+  patient profile and a Log Out action.
 
 ## Reuse before you create
 

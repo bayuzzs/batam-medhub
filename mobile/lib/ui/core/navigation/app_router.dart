@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:mobile/application/auth/auth_controller.dart';
+import 'package:mobile/application/auth/providers.dart';
 import 'package:mobile/ui/auth/login_page.dart';
 import 'package:mobile/ui/auth/onboarding_page.dart';
 import 'package:mobile/ui/auth/register_page.dart';
@@ -22,11 +25,36 @@ abstract final class AppRoutes {
 
 /// Central [GoRouter] configuration used by [MaterialApp.router].
 ///
-/// Add new [GoRoute]s here as the app grows (e.g. authenticated home,
-/// appointment detail, etc.) and expose typed helpers in [AppRouterX].
-abstract final class AppRouter {
-  static final GoRouter router = GoRouter(
+/// A Riverpod provider so the router can react to auth state:
+/// - While a session is being restored on startup, redirects are paused
+///   (`AuthStatus.restoring`) so the app doesn't flicker to login.
+/// - Authenticated users are pulled out of the auth screens into the shell.
+/// - Unauthenticated users are redirected to login away from the shell.
+///
+/// Add new [GoRoute]s here as the app grows (e.g. appointment detail, etc.)
+/// and expose typed helpers in [AppRouterX].
+final appRouterProvider = Provider<GoRouter>((ref) {
+  final router = GoRouter(
     initialLocation: AppRoutes.onboarding,
+    redirect: (context, state) {
+      final auth = ref.read(authControllerProvider);
+      final location = state.matchedLocation;
+      final isAuthScreen = location == AppRoutes.onboarding ||
+          location == AppRoutes.login ||
+          location == AppRoutes.register;
+
+      // Wait for the startup restore before redirecting anywhere.
+      if (auth.status == AuthStatus.restoring) {
+        return null;
+      }
+      if (auth.isAuthenticated && isAuthScreen) {
+        return AppRoutes.chat;
+      }
+      if (auth.status == AuthStatus.unauthenticated && !isAuthScreen) {
+        return AppRoutes.login;
+      }
+      return null;
+    },
     routes: [
       GoRoute(
         path: AppRoutes.onboarding,
@@ -74,7 +102,12 @@ abstract final class AppRouter {
       ),
     ],
   );
-}
+
+  // Re-evaluate redirects whenever auth state changes.
+  ref.listen(authControllerProvider, (_, _) => router.refresh());
+
+  return router;
+});
 
 /// Typed navigation helpers.
 ///
