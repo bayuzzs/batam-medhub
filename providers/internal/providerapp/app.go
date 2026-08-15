@@ -19,6 +19,7 @@ import (
 
 	"batam-medhub/providers/internal/ferry"
 	"batam-medhub/providers/internal/hospital"
+	"batam-medhub/providers/internal/hotel"
 	"batam-medhub/providers/internal/platform"
 )
 
@@ -97,6 +98,11 @@ func Run(identity Identity) error {
 		repo := ferry.NewRepository(db)
 		svc := ferry.NewService(identity.ID, repo)
 		handler := ferry.NewHandler(svc)
+		handler.RegisterRoutes(v1)
+	} else if identity.Type == "HOTEL" {
+		repo := hotel.NewRepository(db)
+		svc := hotel.NewService(identity.ID, repo)
+		handler := hotel.NewHandler(svc)
 		handler.RegisterRoutes(v1)
 	}
 
