@@ -630,7 +630,7 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 	var candidates []builtPackage
 
 	// Package 1: Morning departure (07:30 SGT) -> 10:00 appointment
-	opt1, items1, total1, err := s.assemblePackage(ctx, trip.ID, newRevision, 1, dateStr, 0, planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
+	opt1, items1, total1, err := s.assemblePackage(ctx, trip.ID, newRevision, 1, dateStr, 0, planExpiry, refCurr, totalPax, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
 	if err == nil {
 		candidates = append(candidates, builtPackage{
 			option:            opt1,
@@ -640,7 +640,7 @@ func (s *TripService) GeneratePlans(ctx context.Context, patientID, tripID strin
 	}
 
 	// Package 2: Later departure (08:30 SGT) -> 11:00 appointment
-	opt2, items2, total2, err := s.assemblePackage(ctx, trip.ID, newRevision, 2, dateStr, 1*time.Hour, planExpiry, refCurr, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
+	opt2, items2, total2, err := s.assemblePackage(ctx, trip.ID, newRevision, 2, dateStr, 1*time.Hour, planExpiry, refCurr, totalPax, ferryProvider.ID, transportProvider.ID, hospitalProvider.ID)
 	if err == nil {
 		candidates = append(candidates, builtPackage{
 			option:            opt2,
@@ -738,6 +738,7 @@ func (s *TripService) assemblePackage(
 	timeShift time.Duration,
 	expiresAt time.Time,
 	refCurr string,
+	totalPax int,
 	ferryID, transportID, hospitalID string,
 ) (*model.PlanOption, []*model.PlanItem, int64, error) {
 	planID := auth.NewUUID()
@@ -746,11 +747,11 @@ func (s *TripService) assemblePackage(
 	var ferryOutPrice, ferryRetPrice, transportPickPrice, transportDropPrice, hospitalPrice *ConvertedMoney
 	var err error
 
-	ferryOutPrice, err = s.money.Convert(ctx, Money{AmountMinor: 5000, Currency: "SGD"}, refCurr)
+	ferryOutPrice, err = s.money.Convert(ctx, Money{AmountMinor: 2500 * int64(totalPax), Currency: "SGD"}, refCurr)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	ferryRetPrice, err = s.money.Convert(ctx, Money{AmountMinor: 5000, Currency: "SGD"}, refCurr)
+	ferryRetPrice, err = s.money.Convert(ctx, Money{AmountMinor: 2500 * int64(totalPax), Currency: "SGD"}, refCurr)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -767,7 +768,7 @@ func (s *TripService) assemblePackage(
 		return nil, nil, 0, err
 	}
 
-	sgdTotalMinor := int64(10000)
+	sgdTotalMinor := int64(5000) * int64(totalPax)
 	idrTotalMinor := int64(180000000)
 
 	totalDisplayMinor := ferryOutPrice.Display.AmountMinor +
