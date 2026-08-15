@@ -15,6 +15,7 @@ import (
 	"batam-medhub/internal/config"
 	"batam-medhub/internal/database"
 	"batam-medhub/internal/httpapi"
+	"batam-medhub/internal/model"
 	"batam-medhub/internal/service"
 
 	"gorm.io/gorm"
@@ -166,7 +167,11 @@ func main() {
 	testWorkersAIExtractor(db, jwtSecret)
 	fmt.Println("[PASS] Cloudflare Workers AI extractor verified (guardrails, retries, catalog validation, and seamless fallback).")
 
-	fmt.Println("\n=== ALL B7 AND B8 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
+	// 12. Test Disruption and Recovery Engine (Phase B9)
+	testDisruptionAndRecoveryEngine(db, jwtSecret)
+	fmt.Println("[PASS] Disruption and recovery engine verified (provider event ingestion, deduplication, clinical validation, recovery option generation, Itinerary v2 activation, and manual review fallback).")
+
+	fmt.Println("\n=== ALL B7, B8, AND B9 VERIFICATIONS COMPLETED SUCCESSFULLY ===")
 }
 
 func registerPatient(apiBaseURL, email, name, password, currency string) string {
@@ -1083,3 +1088,511 @@ func testWorkersAIExtractor(db *gorm.DB, jwtSecret string) {
 		panic("expected seamless deterministic fallback to produce MATCHED planning intent")
 	}
 }
+
+func testDisruptionAndRecoveryEngine(db *gorm.DB, jwtSecret string) {
+	fmt.Println("--- Running Disruption and Recovery Engine Verification (B9) ---")
+
+	// 1. Setup Mock Provider Servers
+	hospServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/confirm") {
+			parts := strings.Split(r.URL.Path, "/")
+			holdID := parts[3]
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.Reservation{
+				ReservationID: fmt.Sprintf("hosp-res-%s", holdID),
+				ProviderID:    "hospital-demo-01",
+				Status:        "CONFIRMED",
+				ConfirmedAt:   time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.ReleaseResult{
+				ResourceType: "HOLD",
+				ResourceID:   "hosp-rel",
+				Status:       "RELEASED",
+			})
+			return
+		}
+		if r.URL.Path == "/v1/holds" {
+			var hReq adapter.CreateHoldRequest
+			_ = json.NewDecoder(r.Body).Decode(&hReq)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(adapter.Hold{
+				HoldID:     fmt.Sprintf("hosp-hold-%d", time.Now().UnixNano()%10000),
+				ProviderID: "hospital-demo-01",
+				Status:     "HELD",
+				ExpiresAt:  time.Now().Add(15 * time.Minute).Format(time.RFC3339),
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hospServer.Close()
+
+	transServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/confirm") {
+			parts := strings.Split(r.URL.Path, "/")
+			holdID := parts[3]
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.Reservation{
+				ReservationID: fmt.Sprintf("trans-res-%s", holdID),
+				ProviderID:    "transport-demo-01",
+				Status:        "CONFIRMED",
+				ConfirmedAt:   time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.ReleaseResult{
+				ResourceType: "RESERVATION",
+				ResourceID:   "trans-rel",
+				Status:       "RELEASED",
+			})
+			return
+		}
+		if r.URL.Path == "/v1/holds" {
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(adapter.Hold{
+				HoldID:     fmt.Sprintf("trans-hold-%d", time.Now().UnixNano()%10000),
+				ProviderID: "transport-demo-01",
+				Status:     "HELD",
+				ExpiresAt:  time.Now().Add(15 * time.Minute).Format(time.RFC3339),
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer transServer.Close()
+
+	ferryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/confirm") {
+			parts := strings.Split(r.URL.Path, "/")
+			holdID := parts[3]
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.Reservation{
+				ReservationID: fmt.Sprintf("ferry-res-%s", holdID),
+				ProviderID:    "ferry-demo-01",
+				Status:        "CONFIRMED",
+				ConfirmedAt:   time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(adapter.ReleaseResult{
+				ResourceType: "RESERVATION",
+				ResourceID:   "ferry-rel",
+				Status:       "RELEASED",
+			})
+			return
+		}
+		if r.URL.Path == "/v1/holds" {
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(adapter.Hold{
+				HoldID:     fmt.Sprintf("ferry-hold-%d", time.Now().UnixNano()%10000),
+				ProviderID: "ferry-demo-01",
+				Status:     "HELD",
+				ExpiresAt:  time.Now().Add(15 * time.Minute).Format(time.RFC3339),
+			})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ferryServer.Close()
+
+	hotelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hotelServer.Close()
+
+	cfg := config.Config{
+		HTTPAddr:                ":8096",
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		JWTSigningSecret:        jwtSecret,
+		JWTIssuer:               "batam-medhub",
+		JWTAudience:             "batam-medhub-mobile",
+		JWTAccessTTL:            15 * time.Minute,
+		RefreshTokenTTL:         30 * 24 * time.Hour,
+		HospitalBaseURL:         hospServer.URL,
+		HospitalIntegrationKey:  "hospital_dev_secret",
+		FerryBaseURL:            ferryServer.URL,
+		FerryIntegrationKey:     "ferry_dev_secret",
+		HotelBaseURL:            hotelServer.URL,
+		HotelIntegrationKey:     "hotel_dev_secret",
+		TransportBaseURL:        transServer.URL,
+		TransportIntegrationKey: "transport_dev_secret",
+		ProviderTimeout:         5 * time.Second,
+	}
+
+	testEngine := httpapi.New(db, cfg, nil)
+	testServer := httptest.NewServer(testEngine)
+	defer testServer.Close()
+
+	// 2. Register Patient and Confirm an initial Journey
+	token := registerPatient(testServer.URL, fmt.Sprintf("b9_patient_%d@test.test", time.Now().UnixNano()), "B9 Patient", "Passw0rd123!", "SGD")
+	tripID := createMatchedTripRequest(testServer.URL, token)
+	planRes := generatePlans(testServer.URL, token, tripID)
+
+	bookingIdemKey := fmt.Sprintf("idem-b9-init-book-%d", time.Now().UnixNano())
+	journeyDetail := confirmPlanOption(testServer.URL, token, planRes.Options[0].ID, bookingIdemKey)
+
+	journeyID := journeyDetail.Journey.ID
+	if journeyDetail.Journey.ActiveItineraryVersion != 1 {
+		panic(fmt.Sprintf("expected active itinerary version 1, got %d", journeyDetail.Journey.ActiveItineraryVersion))
+	}
+
+	var hospApptID string
+	for _, it := range journeyDetail.ActiveItinerary.Items {
+		if it.ItemType == "HOSPITAL_APPOINTMENT" {
+			hospApptID = it.ID
+			break
+		}
+	}
+	if hospApptID == "" {
+		panic("hospital appointment item not found in journey")
+	}
+
+	// 3. Test Negative Ingestion Cases
+	// 3a. Invalid Provider Key
+	invalidKeyPayload := map[string]any{
+		"external_event_id": fmt.Sprintf("evt-disrupt-%d", time.Now().UnixNano()),
+		"journey_id":        journeyID,
+		"event_type":        "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
+		"target":            map[string]any{"itinerary_item_id": hospApptID},
+		"actor":             map[string]any{"actor_id": "dr-lee", "name": "Dr Lee", "role": "Cardiologist"},
+		"details": map[string]any{
+			"reason":                "Additional care needed",
+			"instruction_reference": "hospital-instruction://followup-observation/FO-20260822-0001",
+			"replacement_time_window": map[string]any{
+				"starts_at":       "2026-08-22T05:00:00Z",
+				"ends_at":         "2026-08-22T06:30:00Z",
+				"start_time_zone": "Asia/Jakarta",
+				"end_time_zone":   "Asia/Jakarta",
+			},
+			"additional_service_code":     "FOLLOWUP_OBSERVATION",
+			"additional_duration_minutes": 90,
+			"priority":                    "MEDIUM",
+			"travel_clearance_status":     "CLEARED",
+		},
+	}
+	bodyInvalidKey, _ := json.Marshal(invalidKeyPayload)
+	reqInvKey, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyInvalidKey))
+	reqInvKey.Header.Set("X-Provider-Key", "invalid_secret_key")
+	reqInvKey.Header.Set("Content-Type", "application/json")
+	respInvKey, err := http.DefaultClient.Do(reqInvKey)
+	if err != nil || respInvKey.StatusCode != http.StatusUnauthorized {
+		panic(fmt.Sprintf("expected 401 Unauthorized for invalid provider key, got %d", respInvKey.StatusCode))
+	}
+	respInvKey.Body.Close()
+
+	// 3b. Incompatible Event Type (Ferry provider sending HOSPITAL_...)
+	reqIncompType, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyInvalidKey))
+	reqIncompType.Header.Set("X-Provider-Key", "ferry_dev_secret")
+	reqIncompType.Header.Set("Content-Type", "application/json")
+	respIncompType, err := http.DefaultClient.Do(reqIncompType)
+	if err != nil || respIncompType.StatusCode != http.StatusForbidden {
+		panic(fmt.Sprintf("expected 403 Forbidden for incompatible event type, got %d", respIncompType.StatusCode))
+	}
+	respIncompType.Body.Close()
+
+	// 3c. Missing Clinical Details (missing instruction_reference)
+	missingClinPayload := map[string]any{
+		"external_event_id": fmt.Sprintf("evt-disrupt-%d", time.Now().UnixNano()),
+		"journey_id":        journeyID,
+		"event_type":        "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
+		"target":            map[string]any{"itinerary_item_id": hospApptID},
+		"actor":             map[string]any{"actor_id": "dr-lee", "name": "Dr Lee", "role": "Cardiologist"},
+		"details": map[string]any{
+			"reason": "Missing instruction ref",
+		},
+	}
+	bodyMissingClin, _ := json.Marshal(missingClinPayload)
+	reqMissingClin, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyMissingClin))
+	reqMissingClin.Header.Set("X-Provider-Key", "hospital_dev_secret")
+	reqMissingClin.Header.Set("Content-Type", "application/json")
+	respMissingClin, err := http.DefaultClient.Do(reqMissingClin)
+	if err != nil || respMissingClin.StatusCode != http.StatusUnprocessableEntity {
+		panic(fmt.Sprintf("expected 422 Unprocessable Entity for missing clinical details, got %d", respMissingClin.StatusCode))
+	}
+	respMissingClin.Body.Close()
+
+	// 4. Positive Ingestion Test: Ingest Valid Hospital Disruption
+	eventID := fmt.Sprintf("evt-hosp-disrupt-%d", time.Now().UnixNano())
+	validPayload := map[string]any{
+		"external_event_id": eventID,
+		"journey_id":        journeyID,
+		"event_type":        "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
+		"target":            map[string]any{"itinerary_item_id": hospApptID},
+		"actor":             map[string]any{"actor_id": "dr-lee", "name": "Dr Lee", "role": "Cardiologist"},
+		"details": map[string]any{
+			"reason":                "Patient requires additional observation following examination",
+			"instruction_reference": "hospital-instruction://followup-observation/FO-20260822-0001",
+			"replacement_time_window": map[string]any{
+				"starts_at":       "2026-08-22T05:00:00Z",
+				"ends_at":         "2026-08-22T06:30:00Z",
+				"start_time_zone": "Asia/Jakarta",
+				"end_time_zone":   "Asia/Jakarta",
+			},
+			"additional_service_code":     "FOLLOWUP_OBSERVATION",
+			"additional_duration_minutes": 90,
+			"priority":                    "MEDIUM",
+			"travel_clearance_status":     "CLEARED",
+		},
+	}
+	bodyValid, _ := json.Marshal(validPayload)
+	reqValid, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/events/disruptions", bytes.NewReader(bodyValid))
+	reqValid.Header.Set("X-Integration-Key", "hospital_dev_secret")
+	reqValid.Header.Set("Content-Type", "application/json")
+
+	respValid, err := http.DefaultClient.Do(reqValid)
+	if err != nil {
+		panic(err)
+	}
+	defer respValid.Body.Close()
+
+	if respValid.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(respValid.Body)
+		panic(fmt.Sprintf("expected 202 Accepted on disruption ingestion, got %d: %s", respValid.StatusCode, string(raw)))
+	}
+
+	var receipt service.ProviderEventReceipt
+	_ = json.NewDecoder(respValid.Body).Decode(&receipt)
+	if receipt.Outcome != "DISRUPTION_CREATED" || receipt.DisruptionID == nil || *receipt.DisruptionID == "" {
+		panic("expected receipt outcome DISRUPTION_CREATED with non-empty disruption_id")
+	}
+	disruptionID := *receipt.DisruptionID
+
+	// 5. Test Deduplication
+	// 5a. Replay identical payload -> 202 Accepted with DUPLICATE outcome and header
+	reqReplay, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyValid))
+	reqReplay.Header.Set("X-Provider-Key", "hospital_dev_secret")
+	reqReplay.Header.Set("Content-Type", "application/json")
+	respReplay, err := http.DefaultClient.Do(reqReplay)
+	if err != nil || respReplay.StatusCode != http.StatusAccepted {
+		panic(fmt.Sprintf("expected 202 Accepted on deduplicated replay, got %d", respReplay.StatusCode))
+	}
+	if respReplay.Header.Get("Idempotency-Replayed") != "true" {
+		panic("expected Idempotency-Replayed header on deduplicated event")
+	}
+	var receiptReplay service.ProviderEventReceipt
+	_ = json.NewDecoder(respReplay.Body).Decode(&receiptReplay)
+	if receiptReplay.Outcome != "DUPLICATE" {
+		panic(fmt.Sprintf("expected DUPLICATE outcome, got %s", receiptReplay.Outcome))
+	}
+	respReplay.Body.Close()
+
+	// 5b. Conflicting payload with same external_event_id -> 409 Conflict
+	conflictingPayload := map[string]any{
+		"external_event_id": eventID,
+		"journey_id":        journeyID,
+		"event_type":        "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
+		"target":            map[string]any{"itinerary_item_id": hospApptID},
+		"actor":             map[string]any{"actor_id": "dr-changed", "name": "Dr Changed", "role": "Surgeon"},
+		"details": map[string]any{
+			"reason": "Different reason entirely",
+		},
+	}
+	bodyConflict, _ := json.Marshal(conflictingPayload)
+	reqConflict, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyConflict))
+	reqConflict.Header.Set("X-Provider-Key", "hospital_dev_secret")
+	reqConflict.Header.Set("Content-Type", "application/json")
+	respConflict, err := http.DefaultClient.Do(reqConflict)
+	if err != nil || respConflict.StatusCode != http.StatusConflict {
+		panic(fmt.Sprintf("expected 409 Conflict on conflicting deduplication payload, got %d", respConflict.StatusCode))
+	}
+	respConflict.Body.Close()
+
+	// 6. Test GET /v1/disruptions/{disruption_id}
+	reqGetDis, _ := http.NewRequest(http.MethodGet, testServer.URL+"/v1/disruptions/"+disruptionID, nil)
+	reqGetDis.Header.Set("Authorization", "Bearer "+token)
+	respGetDis, err := http.DefaultClient.Do(reqGetDis)
+	if err != nil || respGetDis.StatusCode != http.StatusOK {
+		panic(fmt.Sprintf("expected 200 OK on get disruption, got %d", respGetDis.StatusCode))
+	}
+
+	var disDetail service.DisruptionDetail
+	_ = json.NewDecoder(respGetDis.Body).Decode(&disDetail)
+	respGetDis.Body.Close()
+
+	if disDetail.Disruption.ID != disruptionID || disDetail.Disruption.Impact.Severity != "HIGH" {
+		panic("disruption detail impact or ID mismatch")
+	}
+	if len(disDetail.RecoveryOptions) < 1 {
+		panic("expected at least 1 recovery option generated")
+	}
+	recOption := disDetail.RecoveryOptions[0]
+	if recOption.Status != "PROPOSED" || recOption.TimeDeltaMinutes != 90 {
+		panic(fmt.Sprintf("recovery option invalid: status %s, delta %d", recOption.Status, recOption.TimeDeltaMinutes))
+	}
+
+	// 7. Test Approve Recovery Option (POST /v1/recovery-options/{option_id}/approve)
+	recApproveIdemKey := fmt.Sprintf("idem-rec-app-%d", time.Now().UnixNano())
+	recApprovePayload := map[string]any{"approved": true}
+	bodyRecApp, _ := json.Marshal(recApprovePayload)
+
+	reqRecApp, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/recovery-options/"+recOption.ID+"/approve", bytes.NewReader(bodyRecApp))
+	reqRecApp.Header.Set("Authorization", "Bearer "+token)
+	reqRecApp.Header.Set("Idempotency-Key", recApproveIdemKey)
+	reqRecApp.Header.Set("Content-Type", "application/json")
+
+	respRecApp, err := http.DefaultClient.Do(reqRecApp)
+	if err != nil {
+		panic(err)
+	}
+	defer respRecApp.Body.Close()
+
+	if respRecApp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(respRecApp.Body)
+		panic(fmt.Sprintf("expected 200 OK on approve recovery option, got %d: %s", respRecApp.StatusCode, string(raw)))
+	}
+
+	var v2Journey service.JourneyDetail
+	_ = json.NewDecoder(respRecApp.Body).Decode(&v2Journey)
+
+	if v2Journey.Journey.ActiveItineraryVersion != 2 {
+		panic(fmt.Sprintf("expected active itinerary version 2, got %d", v2Journey.Journey.ActiveItineraryVersion))
+	}
+	if v2Journey.ActiveItinerary.Version != 2 || v2Journey.ActiveItinerary.Status != "ACTIVE" {
+		panic(fmt.Sprintf("expected active itinerary version 2 status ACTIVE, got %d / %s", v2Journey.ActiveItinerary.Version, v2Journey.ActiveItinerary.Status))
+	}
+	if len(v2Journey.ActiveItinerary.Items) != 8 {
+		panic(fmt.Sprintf("expected 8 itinerary items in v2, got %d", len(v2Journey.ActiveItinerary.Items)))
+	}
+
+	// Validate items structure in Version 2
+	items := v2Journey.ActiveItinerary.Items
+	if items[0].ItemType != "FERRY_OUTBOUND" || items[1].ItemType != "ARRIVAL_BUFFER" ||
+		items[2].ItemType != "TRANSPORT_PICKUP" || items[3].ItemType != "HOSPITAL_APPOINTMENT" ||
+		items[4].ItemType != "ADDITIONAL_CARE" || items[5].ItemType != "TRANSPORT_DROPOFF" ||
+		items[6].ItemType != "DEPARTURE_BUFFER" || items[7].ItemType != "FERRY_RETURN" {
+		panic(fmt.Sprintf("unexpected itinerary items ordering in v2: %v, %v, %v, %v, %v, %v, %v, %v",
+			items[0].ItemType, items[1].ItemType, items[2].ItemType, items[3].ItemType,
+			items[4].ItemType, items[5].ItemType, items[6].ItemType, items[7].ItemType))
+	}
+
+	if len(v2Journey.ItineraryVersions) != 2 {
+		panic(fmt.Sprintf("expected 2 itinerary versions in history, got %d", len(v2Journey.ItineraryVersions)))
+	}
+
+	// 8. Test Idempotency Replay on Recovery Approval
+	reqReplayApp, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/recovery-options/"+recOption.ID+"/approve", bytes.NewReader(bodyRecApp))
+	reqReplayApp.Header.Set("Authorization", "Bearer "+token)
+	reqReplayApp.Header.Set("Idempotency-Key", recApproveIdemKey)
+	reqReplayApp.Header.Set("Content-Type", "application/json")
+	respReplayApp, err := http.DefaultClient.Do(reqReplayApp)
+	if err != nil || respReplayApp.StatusCode != http.StatusOK {
+		panic(fmt.Sprintf("expected 200 OK on recovery approval idempotency replay, got %d", respReplayApp.StatusCode))
+	}
+	if respReplayApp.Header.Get("Idempotency-Replayed") != "true" {
+		panic("expected Idempotency-Replayed header on recovery approval replay")
+	}
+	respReplayApp.Body.Close()
+
+	// 9. Verify Itinerary Version 1 status is SUPERSEDED via GET /v1/journeys/{journey_id}/itineraries/1
+	reqGetV1, _ := http.NewRequest(http.MethodGet, testServer.URL+"/v1/journeys/"+journeyID+"/itineraries/1", nil)
+	reqGetV1.Header.Set("Authorization", "Bearer "+token)
+	respGetV1, err := http.DefaultClient.Do(reqGetV1)
+	if err != nil || respGetV1.StatusCode != http.StatusOK {
+		panic(fmt.Sprintf("expected 200 OK for version 1 retrieval, got %d", respGetV1.StatusCode))
+	}
+	var v1Itinerary service.ItineraryVersionDTO
+	_ = json.NewDecoder(respGetV1.Body).Decode(&v1Itinerary)
+	respGetV1.Body.Close()
+	if v1Itinerary.Status != "SUPERSEDED" || v1Itinerary.Version != 1 {
+		panic(fmt.Sprintf("expected version 1 status SUPERSEDED, got %s", v1Itinerary.Status))
+	}
+
+	// 10. Verify Disruption status in database is RESOLVED
+	var disModel model.Disruption
+	if err := db.Where("id = ?", disruptionID).First(&disModel).Error; err != nil || disModel.Status != "RESOLVED" {
+		panic(fmt.Sprintf("expected disruption status RESOLVED in db, got %s", disModel.Status))
+	}
+
+	// 11. Test Alternative Route: POST /v1/journeys/{journey_id}/recovery-options/{option_id}/select
+	tripID2 := createMatchedTripRequest(testServer.URL, token)
+	planRes2 := generatePlans(testServer.URL, token, tripID2)
+	journeyDetail2 := confirmPlanOption(testServer.URL, token, planRes2.Options[0].ID, fmt.Sprintf("idem-b9-init2-%d", time.Now().UnixNano()))
+
+	var hospApptID2 string
+	for _, it := range journeyDetail2.ActiveItinerary.Items {
+		if it.ItemType == "HOSPITAL_APPOINTMENT" {
+			hospApptID2 = it.ID
+			break
+		}
+	}
+
+	validPayload2 := map[string]any{
+		"external_event_id": fmt.Sprintf("evt-hosp-disrupt-2-%d", time.Now().UnixNano()),
+		"journey_id":        journeyDetail2.Journey.ID,
+		"event_type":        "HOSPITAL_ADDITIONAL_CARE_REQUESTED",
+		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
+		"target":            map[string]any{"itinerary_item_id": hospApptID2},
+		"actor":             map[string]any{"actor_id": "dr-lee", "name": "Dr Lee", "role": "Cardiologist"},
+		"details": map[string]any{
+			"reason":                "Patient requires additional observation following examination",
+			"instruction_reference": "hospital-instruction://followup-observation/FO-20260822-0002",
+			"replacement_time_window": map[string]any{
+				"starts_at":       "2026-08-22T05:00:00Z",
+				"ends_at":         "2026-08-22T06:30:00Z",
+				"start_time_zone": "Asia/Jakarta",
+				"end_time_zone":   "Asia/Jakarta",
+			},
+			"additional_service_code":     "FOLLOWUP_OBSERVATION",
+			"additional_duration_minutes": 90,
+			"priority":                    "MEDIUM",
+			"travel_clearance_status":     "CLEARED",
+		},
+	}
+	bodyValid2, _ := json.Marshal(validPayload2)
+	reqValid2, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/provider/disruptions", bytes.NewReader(bodyValid2))
+	reqValid2.Header.Set("X-Provider-Key", "hospital_dev_secret")
+	reqValid2.Header.Set("Content-Type", "application/json")
+	respValid2, err := http.DefaultClient.Do(reqValid2)
+	if err != nil || respValid2.StatusCode != http.StatusAccepted {
+		panic(fmt.Sprintf("expected 202 on second disruption ingestion, got %d", respValid2.StatusCode))
+	}
+	var receipt2 service.ProviderEventReceipt
+	_ = json.NewDecoder(respValid2.Body).Decode(&receipt2)
+	respValid2.Body.Close()
+
+	disDetail2, err := http.DefaultClient.Get(testServer.URL + "/v1/disruptions/" + *receipt2.DisruptionID)
+	// Authenticated retrieval
+	reqGetDis2, _ := http.NewRequest(http.MethodGet, testServer.URL+"/v1/disruptions/"+*receipt2.DisruptionID, nil)
+	reqGetDis2.Header.Set("Authorization", "Bearer "+token)
+	respGetDis2, err := http.DefaultClient.Do(reqGetDis2)
+	if err != nil || respGetDis2.StatusCode != http.StatusOK {
+		panic("failed to retrieve second disruption")
+	}
+	var disDetailObj2 service.DisruptionDetail
+	_ = json.NewDecoder(respGetDis2.Body).Decode(&disDetailObj2)
+	respGetDis2.Body.Close()
+	_ = disDetail2
+
+	// Select via POST /v1/journeys/{journey_id}/recovery-options/{option_id}/select
+	reqSelect, _ := http.NewRequest(http.MethodPost, testServer.URL+"/v1/journeys/"+journeyDetail2.Journey.ID+"/recovery-options/"+disDetailObj2.RecoveryOptions[0].ID+"/select", bytes.NewReader(bodyRecApp))
+	reqSelect.Header.Set("Authorization", "Bearer "+token)
+	reqSelect.Header.Set("Idempotency-Key", fmt.Sprintf("idem-select-app-%d", time.Now().UnixNano()))
+	reqSelect.Header.Set("Content-Type", "application/json")
+	respSelect, err := http.DefaultClient.Do(reqSelect)
+	if err != nil || respSelect.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(respSelect.Body)
+		panic(fmt.Sprintf("expected 200 OK on alias recovery option select, got %d: %s", respSelect.StatusCode, string(raw)))
+	}
+	var v2Journey2 service.JourneyDetail
+	_ = json.NewDecoder(respSelect.Body).Decode(&v2Journey2)
+	respSelect.Body.Close()
+	if v2Journey2.Journey.ActiveItineraryVersion != 2 {
+		panic("expected active itinerary version 2 on alias select")
+	}
+}
+

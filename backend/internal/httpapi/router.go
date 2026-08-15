@@ -111,6 +111,8 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 	tripSvc := service.NewTripService(db, catalogSvc, moneySvc, aggregator, aiExtractor)
 	bookingSvc := service.NewBookingSagaService(db, hospAdapter, ferryAdapter, hotelAdapter, transAdapter, moneySvc)
 	journeySvc := service.NewJourneyService(db)
+	provAuthSvc := service.NewProviderAuthService(db)
+	disruptionSvc := service.NewDisruptionService(db, hospAdapter, ferryAdapter, hotelAdapter, transAdapter, moneySvc, journeySvc)
 
 	registerLimiter := newIPRateLimiter(30, time.Minute)
 	loginLimiter := newIPRateLimiter(30, time.Minute)
@@ -163,6 +165,25 @@ func New(db *gorm.DB, cfg config.Config, logger *slog.Logger) *gin.Engine {
 			journeyGroup.GET("/:journey_id", handleGetJourneyItinerary(journeySvc))
 			journeyGroup.GET("/:journey_id/itinerary", handleGetJourneyItinerary(journeySvc))
 			journeyGroup.GET("/:journey_id/itineraries/:version", handleGetJourneyItineraryVersion(journeySvc))
+			journeyGroup.POST("/:journey_id/recovery-options/:option_id/select", handleApproveRecoveryOption(disruptionSvc, idemSvc))
+		}
+
+		// Provider Disruption Ingestion (OpenAPI: POST /v1/provider/disruptions and alias POST /v1/events/disruptions)
+		v1.POST("/provider/disruptions", handleProviderDisruption(provAuthSvc, disruptionSvc))
+		v1.POST("/events/disruptions", handleProviderDisruption(provAuthSvc, disruptionSvc))
+
+		// Disruption Detail (Auth: PatientBearer)
+		disruptionGroup := v1.Group("/disruptions")
+		disruptionGroup.Use(patientBearerAuth(db, cfg))
+		{
+			disruptionGroup.GET("/:disruption_id", handleGetDisruption(disruptionSvc))
+		}
+
+		// Recovery Options Approval (OpenAPI: POST /v1/recovery-options/:recovery_option_id/approve)
+		recoveryGroup := v1.Group("/recovery-options")
+		recoveryGroup.Use(patientBearerAuth(db, cfg))
+		{
+			recoveryGroup.POST("/:recovery_option_id/approve", handleApproveRecoveryOption(disruptionSvc, idemSvc))
 		}
 	}
 
